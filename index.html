@@ -142,7 +142,12 @@
     <input type="file" id="xml" accept=".xml">
     <div class="muted" id="xmlMsg"></div>
 
-    <h2>4. バックアップ</h2>
+    <h2>4. BPMの自動補完（Deezer）</h2>
+    <p class="muted">SpotifyからはBPMが取れないため、BPMが分からない曲をDeezerで調べて補います（キーは取れません）。rekordbox・手入力の値がある曲には触れません。</p>
+    <label class="ck"><input type="checkbox" id="autoDz" checked> プレイリスト読み込み後に自動で実行</label>
+    <div style="margin-top:6px"><button id="runDz">今すぐBPMを補完</button> <span class="muted" id="dzMsg"></span></div>
+
+    <h2>5. バックアップ</h2>
     <button id="metaOut">BPM・キーの手入力データを書き出す</button>
     <label><button id="metaInBtn">読み込む</button><input type="file" id="metaIn" accept=".json" hidden></label>
   </div>
@@ -175,6 +180,7 @@ const S = {
   plIndex:[],       // 取得した一覧（選択用）
   saved:[],         // お気に入りの曲ID
   meta:{},          // id -> {bpm,key,genre,src}
+  dz:{},            // Deezer問い合わせ済み id -> bpm(0=不明)
   occ:{},           // id -> [[plIdx,pos],...]
   now:null, hist:[], me:null, lastPlayingId:null
 };
@@ -235,7 +241,7 @@ function slimTrack(t){
   if(!t || t.type && t.type!=="track" || !t.id || t.is_local) return null;
   const imgs = t.album?.images||[];
   return {id:t.id, uri:t.uri, name:t.name, artists:(t.artists||[]).map(a=>({id:a.id,name:a.name})),
-    album:t.album?.name||"", img:(imgs[imgs.length-1]||imgs[0]||{}).url||"", year:+(t.album?.release_date||"").slice(0,4)||null};
+    album:t.album?.name||"", isrc:t.external_ids?.isrc||"", img:(imgs[imgs.length-1]||imgs[0]||{}).url||"", year:+(t.album?.release_date||"").slice(0,4)||null};
 }
 async function loadPlaylistIndex(){
   if(!S.me) S.me = await api("/me");
@@ -288,6 +294,7 @@ async function scan(){
     await persist(); buildIndex(); renderPlList();
     $("#scanMsg").textContent=`完了：プレイリスト ${S.playlists.length}本 / 曲 ${Object.keys(S.tracks).length}`;
     refresh();
+    if($("#autoDz").checked) fillBpm();
   }catch(e){ $("#scanMsg").textContent="中断："+e.message; S.playlists=[...next, ...S.playlists.filter(p=>!next.find(n=>n.id===p.id))]; await persist(); buildIndex(); }
 }
 async function persist(){ await DB.set("tracks",S.tracks); await DB.set("playlists",S.playlists); await DB.set("saved",S.saved); await DB.set("meta",S.meta); }
@@ -380,7 +387,7 @@ function renderDeck(){
   if(!t){ $("#deck").innerHTML=`<div class="muted">曲が未選択です。下の検索か、Spotifyの再生追従で選んでください。</div>`; return; }
   const m=S.meta[t.id]||{};
   $("#deck").innerHTML=`<div class="row"><img src="${esc(t.img)}" alt=""><div><div class="t">${esc(t.name)}</div><div class="a">${esc(arts(t))}</div><div class="muted">${esc(t.album)} ${t.year||""}</div></div></div>
-   <div class="bk"><span class="big">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="muted">BPM</span><span class="big k">${m.key||"—"}</span><span class="muted">${m.genre?esc(m.genre):""}</span></div>
+   <div class="bk"><span class="big">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="muted">BPM</span><span class="big k">${m.key||"—"}</span><span class="muted">${m.genre?esc(m.genre):""} ${m.src?"("+({deezer:"Deezer",rekordbox:"rekordbox",manual:"手入力"}[m.src]||m.src)+")":""}</span></div>
    <div class="bk"><input id="eBpm" placeholder="BPM" value="${m.bpm||""}"><input id="eKey" placeholder="キー 8A/Am" value="${m.key||""}"><button class="sm" id="saveMeta">保存</button><button class="sm" id="tap">TAP</button><span class="muted" id="tapv"></span></div>`;
   $("#saveMeta").onclick=()=>{ const bpm=parseFloat($("#eBpm").value)||null; const kRaw=$("#eKey").value.trim(); const key=toCamelot(kRaw);
     if(kRaw && !key){ toast("キーは 8A や Am の形で入力してください"); return; }
@@ -409,6 +416,7 @@ function setNow(id, push=true){
   if(!S.tracks[id]) return;
   if(push && S.now && S.now!==id){ S.hist.push(S.now); }
   S.now=id; LS.set("now",id); LS.set("hist",S.hist); refresh();
+  if(!S.meta[id]?.bpm && !(id in S.dz)) deezerBpm(S.tracks[id]).then(b=>{ S.dz[id]=b; if(b){ S.meta[id]={...(S.meta[id]||{}),bpm:b,src:"deezer"}; DB.set("meta",S.meta);} DB.set("dz",S.dz); if(S.now===id) refresh(); }).catch(()=>{});
 }
 
 // ---------- 再生操作 ----------
@@ -430,6 +438,42 @@ async function exportSet(){
     for(let i=0;i<uris.length;i+=100) await api(`/playlists/${pl.id}/items`,{method:"POST",body:JSON.stringify({uris:uris.slice(i,i+100)})});
     toast("プレイリストを作成しました："+name);
   }catch(e){ toast("作成に失敗："+e.message); }
+}
+
+// ---------- Deezer から BPM 補完 ----------
+function jsonp(url){ return new Promise((res,rej)=>{ const cb="dz"+Math.random().toString(36).slice(2); const s=document.createElement("script");
+  const done=()=>{ delete window[cb]; s.remove(); clearTimeout(tm); };
+  const tm=setTimeout(()=>{ done(); rej(new Error("timeout")); },8000);
+  window[cb]=d=>{ done(); res(d); };
+  s.src=url+(url.includes("?")?"&":"?")+"output=jsonp&callback="+cb; s.onerror=()=>{ done(); rej(new Error("load error")); };
+  document.head.appendChild(s); }); }
+async function deezerBpm(t){
+  let d=null;
+  if(t.isrc){ d=await jsonp("https://api.deezer.com/track/isrc:"+encodeURIComponent(t.isrc)); if(d&&d.error) d=null; }
+  if(!d){ const q=`artist:"${(t.artists[0]?.name||"").replace(/"/g,"")}" track:"${t.name.replace(/"/g,"")}"`;
+    const sr=await jsonp("https://api.deezer.com/search?limit=1&q="+encodeURIComponent(q));
+    const hit=sr&&sr.data&&sr.data[0]; if(hit){ await sleep(120); d=await jsonp("https://api.deezer.com/track/"+hit.id); if(d&&d.error) d=null; } }
+  return d&&d.bpm>0 ? Math.round(d.bpm*10)/10 : 0;
+}
+let dzRunning=false;
+async function fillBpm(ids, label="Deezer"){
+  if(dzRunning) return; dzRunning=true;
+  const todo=(ids||Object.keys(S.tracks)).filter(id=>S.tracks[id] && !S.meta[id]?.bpm && !(id in S.dz));
+  let n=0, got=0;
+  try{
+    for(const id of todo){
+      let b=0; try{ b=await deezerBpm(S.tracks[id]); }catch(e){ if(String(e).includes("timeout")) { await sleep(2000); continue; } }
+      S.dz[id]=b; n++;
+      if(b){ S.meta[id]={...(S.meta[id]||{}),bpm:b,src:S.meta[id]?.src||"deezer"}; got++; }
+      if(n%20===0){ await DB.set("meta",S.meta); await DB.set("dz",S.dz); setStatus(`${label}でBPM取得中 ${n}/${todo.length}（取得 ${got}）`); renderCands(); }
+      await sleep(160);
+    }
+  } finally {
+    dzRunning=false; await DB.set("meta",S.meta); await DB.set("dz",S.dz);
+    if(todo.length>1) setStatus(`DeezerでBPM取得完了：${todo.length}曲中 ${got}曲`);
+    if($("#dzMsg")) $("#dzMsg").textContent=`前回：${todo.length}曲を確認し ${got}曲のBPMを取得`;
+    refresh();
+  }
 }
 
 // ---------- rekordbox XML ----------
@@ -479,6 +523,8 @@ $("#plNone").onclick=()=>{ LS.set("plSel",[]); renderPlList(); };
 $("#plList").addEventListener("change",saveSel);
 $("#scan").onclick=()=>scan();
 $("#xml").onchange=e=>e.target.files[0]&&importXml(e.target.files[0]).catch(err=>$("#xmlMsg").textContent="読み込み失敗："+err.message);
+$("#runDz").onclick=()=>fillBpm();
+$("#autoDz").checked=LS.get("autoDz",true); $("#autoDz").onchange=e=>LS.set("autoDz",e.target.checked);
 $("#metaOut").onclick=()=>{ const man=Object.fromEntries(Object.entries(S.meta).filter(([,v])=>v.src==="manual"));
   const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([JSON.stringify(man)],{type:"application/json"})); a.download="yotsuji-next-meta.json"; a.click(); };
 $("#metaInBtn").onclick=()=>$("#metaIn").click();
@@ -495,7 +541,7 @@ $("#btnClearHist").onclick=()=>{ S.hist=[]; LS.set("hist",[]); refresh(); };
 (async()=>{
   await DB.open();
   S.tracks=await DB.get("tracks")||{}; S.playlists=await DB.get("playlists")||[]; S.saved=await DB.get("saved")||[];
-  S.meta=await DB.get("meta")||{}; S.plIndex=await DB.get("plIndex")||[];
+  S.meta=await DB.get("meta")||{}; S.dz=await DB.get("dz")||{}; S.plIndex=await DB.get("plIndex")||[];
   S.hist=LS.get("hist",[]); S.now=LS.get("now",null);
   buildIndex();
   try{ await handleRedirect(); }catch(e){ toast("認証失敗："+e.message); }
