@@ -75,13 +75,23 @@
   .empty{color:var(--dim);padding:30px 0;text-align:center}
   label.ck{display:flex;gap:6px;align-items:center}
   img[src=""]{visibility:hidden}
+  .cand.sel{background:#16201d;outline:1px solid #2c4a41}
+  body.dj [data-q], body.dj [data-p]{display:none}
+  body.dj [data-n]{background:var(--accent);color:#08110e;border-color:var(--accent);font-weight:600;padding:6px 14px;font-size:13px}
+  body.dj .follow-row{opacity:.4;pointer-events:none}
+  #djBadge{display:none;font:600 11px var(--mono);color:#08110e;background:var(--accent2);border-radius:4px;padding:2px 6px}
+  body.dj #djBadge{display:inline}
+  .keys{font:11px var(--mono);color:var(--dim);margin-left:auto}
+  .keys b{color:var(--text);font-weight:500;border:1px solid var(--line);border-radius:3px;padding:0 4px}
 </style>
 </head>
 <body>
 <header>
   <h1>四辻 <span>NEXT</span></h1>
+  <span id="djBadge">DJ MODE</span>
   <span id="status">未接続</span>
   <span class="sp"></span>
+  <label class="ck" title="rekordboxで再生中は「再生」「キュー」を隠し、追従を止めます"><input type="checkbox" id="djMode"> DJモード</label>
   <button id="btnLib">ライブラリ</button>
   <button id="btnLogin" class="pri">Spotifyに接続</button>
 </header>
@@ -89,12 +99,12 @@
   <aside>
     <h2>Now Playing</h2>
     <div class="deck" id="deck"><div class="muted">曲が未選択です。下の検索か、Spotifyの再生追従で選んでください。</div></div>
-    <div class="bk">
+    <div class="bk follow-row">
       <label class="ck"><input type="checkbox" id="follow"> Spotifyの再生中を追従</label>
     </div>
 
     <h2>ライブラリから選ぶ</h2>
-    <input id="q" placeholder="曲名・アーティストで検索" style="width:100%">
+    <input id="q" placeholder="曲名・アーティストで検索（/ で移動、Enterで決定）" style="width:100%">
     <div class="search-res" id="sres"></div>
 
     <h2>重み付け</h2>
@@ -118,6 +128,7 @@
       <label class="ck"><input type="checkbox" id="fArtist" checked> 同じアーティストを避ける</label>
       <label class="ck"><input type="checkbox" id="fHalf" checked> 倍／半分テンポも可</label>
       <span class="muted" id="candInfo"></span>
+      <span class="keys"><b>↑↓</b> 選択 <b>Enter</b> Nowへ <b>/</b> 検索 <b>U</b> 取り消し</span>
     </div>
     <div id="cands"><div class="empty">ライブラリを読み込み、Now Playingを決めると候補が並びます。</div></div>
   </section>
@@ -403,14 +414,16 @@ function renderDeck(){
 function renderHist(){
   $("#hist").innerHTML = S.hist.length ? S.hist.map((id,i)=>{const t=S.tracks[id]; return t?`<div><span class="n">${i+1}</span><span>${esc(t.name)} <span class="muted">— ${esc(arts(t))}</span></span></div>`:"";}).join("") : `<div class="muted">まだありません</div>`;
 }
-function renderCands(){
+let sel=0;
+function renderCands(keepSel){
   if(!S.now){ return; }
+  if(!keepSel) sel=0;
   const list=suggest(); const top=list.slice(0,60);
   $("#candInfo").textContent = `候補 ${list.length}曲`;
   if(!top.length){ $("#cands").innerHTML=`<div class="empty">条件に合う候補がありません。フィルタを緩めるか、この曲を含むプレイリストを読み込んでください。</div>`; return; }
   const max=top[0].sc;
   $("#cands").innerHTML = top.map((c,i)=>{ const t=S.tracks[c.id]; const m=S.meta[c.id]||{};
-    return `<div class="cand"><span class="sc">${Math.round(c.sc/max*100)}</span><img src="${esc(t.img)}" alt="" loading="lazy">
+    return `<div class="cand${i===sel?" sel":""}" data-i="${i}" data-id="${c.id}"><span class="sc">${Math.round(c.sc/max*100)}</span><img src="${esc(t.img)}" alt="" loading="lazy">
       <div><div class="nm">${esc(t.name)}</div><div class="muted">${esc(arts(t))}</div><div class="chips">${c.chips.map(([k,x])=>`<span class="chip ${k}">${esc(x)}</span>`).join("")}</div></div>
       <span class="meta">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="meta" style="color:var(--accent2)">${m.key||"—"}</span>
       <span class="acts"><button class="sm" data-q="${c.id}">キュー</button><button class="sm" data-p="${c.id}">再生</button><button class="sm" data-n="${c.id}">Nowへ</button></span></div>`; }).join("");
@@ -512,6 +525,32 @@ function doSearch(){
   $("#sres").innerHTML = out.map(t=>`<div data-n="${t.id}">${esc(t.name)} <span class="muted">— ${esc(arts(t))}</span></div>`).join("") || `<div class="muted">見つかりません</div>`;
 }
 
+// ---------- キーボード操作 ----------
+function moveSel(d){ const rows=$$("#cands .cand"); if(!rows.length) return;
+  sel=Math.max(0,Math.min(rows.length-1,sel+d)); rows.forEach((r,i)=>r.classList.toggle("sel",i===sel));
+  rows[sel].scrollIntoView({block:"nearest"}); }
+function undoNow(){ if(!S.hist.length) return; S.now=S.hist.pop(); LS.set("now",S.now); LS.set("hist",S.hist); refresh(); setStatus("ひとつ前に戻しました"); }
+document.addEventListener("keydown",e=>{
+  if(e.metaKey||e.ctrlKey||e.altKey) return;
+  const t=e.target, typing=t.tagName==="INPUT"&&t.type!=="checkbox"&&t.type!=="range"||t.tagName==="SELECT"||t.tagName==="TEXTAREA";
+  if($("#dlgLib").open) return;
+  if(t.id==="q"){
+    if(e.key==="Enter"){ const f=$("#sres [data-n]"); if(f){ e.preventDefault(); f.click(); t.blur(); } }
+    else if(e.key==="Escape"){ t.value=""; doSearch(); t.blur(); }
+    return;
+  }
+  if(typing) return;
+  if(e.key==="/"){ e.preventDefault(); $("#q").focus(); }
+  else if(e.key==="ArrowDown"||e.key==="j"){ e.preventDefault(); moveSel(1); }
+  else if(e.key==="ArrowUp"||e.key==="k"){ e.preventDefault(); moveSel(-1); }
+  else if(e.key==="Enter"){ const r=$$("#cands .cand")[sel]; if(r){ e.preventDefault(); setNow(r.dataset.id); } }
+  else if(e.key==="u"||e.key==="U"){ e.preventDefault(); undoNow(); }
+});
+$("#cands").addEventListener("click",e=>{ const r=e.target.closest(".cand"); if(r&&!e.target.closest("button")){ sel=+r.dataset.i; moveSel(0); } });
+function setDj(on){ document.body.classList.toggle("dj",on); LS.set("dj",on); $("#djMode").checked=on;
+  if(on){ $("#follow").checked=false; setFollow(false); } }
+$("#djMode").onchange=e=>setDj(e.target.checked);
+
 // ---------- UI配線 ----------
 function openLib(){ $("#redir").textContent=REDIRECT; $("#cid").value=LS.get("cid",""); $("#incSaved").checked=LS.get("incSaved",false); renderPlList(); $("#dlgLib").showModal(); }
 document.addEventListener("click",e=>{
@@ -550,8 +589,9 @@ $("#btnClearHist").onclick=()=>{ S.hist=[]; LS.set("hist",[]); refresh(); };
   S.hist=LS.get("hist",[]); S.now=LS.get("now",null);
   buildIndex();
   try{ await handleRedirect(); }catch(e){ toast("認証失敗："+e.message); }
+  setDj(LS.get("dj",false));
   if(await token()){ $("#btnLogin").textContent="接続済み"; try{ S.me=await api("/me"); setStatus(`${S.me.display_name||S.me.id} / 曲 ${Object.keys(S.tracks).length} / PL ${S.playlists.length}`);}catch(e){ setStatus(e.message); }
-    if(LS.get("follow",false)){ $("#follow").checked=true; setFollow(true); } }
+    if(LS.get("follow",false) && !LS.get("dj",false)){ $("#follow").checked=true; setFollow(true); } }
   if(!S.playlists.length && !LS.get("cid","")) openLib();
   refresh();
 })();
