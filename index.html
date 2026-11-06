@@ -50,6 +50,7 @@
   .sl{display:grid;grid-template-columns:110px 1fr 28px;gap:6px;align-items:center;margin:4px 0}
   .sl span:last-child{font-family:var(--mono);color:var(--dim);text-align:right}
   .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  .cand .sub{font:11px var(--mono);color:var(--dim);margin-top:1px}
   .cand{display:grid;grid-template-columns:34px 44px 1fr 70px 52px auto;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid var(--line)}
   .cand:hover{background:#111415}
   .cand img{width:44px;height:44px;border-radius:3px;object-fit:cover;background:#222}
@@ -338,7 +339,7 @@ function slimTrack(t){
   if(!t || t.type && t.type!=="track" || !t.id || t.is_local) return null;
   const imgs = t.album?.images||[];
   return {id:t.id, uri:t.uri, name:t.name, artists:(t.artists||[]).map(a=>({id:a.id,name:a.name})),
-    album:t.album?.name||"", albumId:t.album?.id||"", dur:t.duration_ms||0, isrc:t.external_ids?.isrc||"", img:(imgs[imgs.length-1]||imgs[0]||{}).url||"", year:+(t.album?.release_date||"").slice(0,4)||null};
+    album:t.album?.name||"", albumId:t.album?.id||"", dur:t.duration_ms||0, isrc:t.external_ids?.isrc||"", img:(imgs[imgs.length-1]||imgs[0]||{}).url||"", pop:Number.isFinite(t.popularity)?t.popularity:null, year:+(t.album?.release_date||"").slice(0,4)||null};
 }
 async function loadPlaylistIndex(){
   if(!S.me) S.me = await api("/me");
@@ -367,11 +368,11 @@ async function scan(opt={}){
   const sel = new Set(LS.get("plSel",[]));
   const targets = S.plIndex.filter(p=>sel.has(p.id)&&p.own);
   const keep = new Map(S.playlists.map(p=>[p.id,p]));
-  const next=[]; let done=0;
+  const next=[]; let done=0; const full=opt.full || LS.get("trackVer",1)<TRACK_VER;
   try{
     for(const p of targets){
       const old = keep.get(p.id);
-      if(old && old.snapshot===p.snapshot){ next.push(old); }
+      if(!full && old && old.snapshot===p.snapshot){ next.push(old); }
       else{
         const ids=[]; let url=`/playlists/${p.id}/items?limit=50`;
         while(url){ const j = await api(url);
@@ -388,7 +389,7 @@ async function scan(opt={}){
       while(url){ const j=await api(url); if(first){ first=false; LS.set("savedSig",savedSig(j)); } for(const it of j.items||[]){ const t=slimTrack(it.track||it.item); if(t){S.tracks[t.id]=t; ids.push(t.id);} } url=j.next; $("#scanMsg").textContent=`お気に入り ${ids.length}曲…`; await sleep(80); }
       S.saved=ids;
     }
-    LS.set("incSaved",$("#incSaved").checked); LS.set("libAt",Date.now());
+    LS.set("incSaved",$("#incSaved").checked); LS.set("libAt",Date.now()); LS.set("trackVer",TRACK_VER);
     await persist(); buildIndex(); renderPlList();
     $("#scanMsg").textContent=`完了：プレイリスト ${S.playlists.length}本 / 曲 ${Object.keys(S.tracks).length}`;
     refresh();
@@ -396,6 +397,7 @@ async function scan(opt={}){
   }catch(e){ $("#scanMsg").textContent="中断："+e.message; if(opt.auto) setStatus("自動取り込みを中断："+e.message); S.playlists=[...next, ...S.playlists.filter(p=>!next.find(n=>n.id===p.id))]; await persist(); buildIndex(); }
   finally{ S.scanning=false; }
 }
+const TRACK_VER=2;  // 2: 人気度(pop)を保存。古いデータは一度だけ全部読み直す
 const savedSig=j=>(j.total||0)+":"+((j.items||[])[0]?.track?.id||"");
 
 // ---------- 自動化 ----------
@@ -412,10 +414,11 @@ async function autoRefreshLib(force){
     const want=S.plIndex.filter(p=>sel.has(p.id)&&p.own);
     const changed=want.filter(p=>before.get(p.id)!==p.snapshot);
     const removed=S.playlists.some(p=>!want.find(x=>x.id===p.id));
-    let saved=false;
-    if(LS.get("incSaved",false)){ const j=await api("/me/tracks?limit=1"); saved=savedSig(j)!==LS.get("savedSig",""); }
-    if(changed.length||removed||saved){
-      setStatus(`ライブラリの変更を自動で取り込み中（プレイリスト ${changed.length}本${saved?"・お気に入り":""}）…`);
+    const mig=LS.get("trackVer",1)<TRACK_VER;
+    let saved=mig && LS.get("incSaved",false);
+    if(!saved && LS.get("incSaved",false)){ const j=await api("/me/tracks?limit=1"); saved=savedSig(j)!==LS.get("savedSig",""); }
+    if(changed.length||removed||saved||mig){
+      setStatus(mig?"人気度を取り込むため、プレイリストを一度だけ全部読み直しています…":`ライブラリの変更を自動で取り込み中（プレイリスト ${changed.length}本${saved?"・お気に入り":""}）…`);
       $("#incSaved").checked=LS.get("incSaved",false);
       await scan({auto:true,saved});
       setStatus(`自動で取り込みました：PL ${S.playlists.length}本 / 曲 ${Object.keys(S.tracks).length}`);
@@ -535,11 +538,11 @@ function renderDeck(){
   const m=S.meta[t.id]||{};
   $("#mobileNow").innerHTML=`<b>NOW</b>${esc(t.name)} <span class="muted">— ${esc(arts(t))}</span><span class="m">${m.bpm?m.bpm.toFixed(1):"—"} ${m.key||""}</span>`;
   $("#deck").innerHTML=`<div class="row"><img src="${esc(t.img)}" alt=""><div><div class="t">${esc(t.name)}</div><div class="a">${esc(arts(t))}</div><div class="muted">${esc(t.album)} ${t.year||""}</div></div></div>
-   <div class="bk"><span class="big">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="muted">BPM</span><span class="big k">${m.key||"—"}</span><span class="muted">${m.genre?esc(m.genre):""} ${m.src?"("+(SRC_LABEL[m.src]||m.src)+")":""}</span></div>
+   <div class="bk"><span class="big">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="muted">BPM</span><span class="big k">${m.key||"—"}</span><span class="muted">${m.genre?esc(m.genre):""} ${m.src?"("+(SRC_LABEL[m.src]||m.src)+(m.kSrc&&m.kSrc!==m.src?" / キー: "+(SRC_LABEL[m.kSrc]||m.kSrc):"")+(m.bSrc&&m.bSrc!==m.src?" / BPM: "+(SRC_LABEL[m.bSrc]||m.bSrc):"")+")":""}</span></div>
    <div class="bk"><input id="eBpm" placeholder="BPM" value="${m.bpm||""}"><input id="eKey" placeholder="キー 8A/Am" value="${m.key||""}"><button class="sm" id="saveMeta">保存</button><button class="sm" id="tap">TAP</button><button class="sm" data-c="${t.id}" title="曲名をコピー">⎘ コピー</button><span class="muted" id="tapv"></span></div>`;
   $("#saveMeta").onclick=()=>{ const bpm=parseFloat($("#eBpm").value)||null; const kRaw=$("#eKey").value.trim(); const key=toCamelot(kRaw);
     if(kRaw && !key){ toast("キーは 8A や Am の形で入力してください"); return; }
-    S.meta[t.id]={...(S.meta[t.id]||{}),bpm,key,src:"manual"}; DB.set("meta",S.meta); refresh(); autoSync(); };
+    const {kSrc,bSrc,...rest}=S.meta[t.id]||{}; S.meta[t.id]={...rest,bpm,key,src:"manual"}; DB.set("meta",S.meta); refresh(); autoSync(); };
   let taps=[]; $("#tap").onclick=()=>{ const n=performance.now(); if(taps.length && n-taps[taps.length-1]>2000) taps=[]; taps.push(n); taps=taps.slice(-9);
     if(taps.length>=4){ const iv=(taps[taps.length-1]-taps[0])/(taps.length-1); const b=60000/iv; $("#eBpm").value=b.toFixed(1); $("#tapv").textContent=`${taps.length}回`; } else $("#tapv").textContent=`${taps.length}回…`; };
 }
@@ -547,16 +550,24 @@ function renderHist(){
   $("#hist").innerHTML = S.hist.length ? S.hist.map((id,i)=>{const t=S.tracks[id]; return t?`<div><span class="n">${i+1}</span><span>${esc(t.name)} <span class="muted">— ${esc(arts(t))}</span></span></div>`:"";}).join("") : `<div class="muted">まだありません</div>`;
 }
 let sel=0;
+function labelMap(){ const m={};
+  for(const [id,e] of Object.entries(S.ex)){ const l=e?.sp?.label||e?.dz?.album?.label; const al=S.tracks[id]?.albumId; if(l&&al&&!m[al]) m[al]=l; }
+  return m; }
+function labelOf(id,lm){ const e=S.ex[id], t=S.tracks[id];
+  return e?.sp?.label || e?.dz?.album?.label || (t?.albumId&&lm[t.albumId]) || S.meta[id]?.af?.lbl || S.dg[id]?.label?.[0] || ""; }
+function subLine(id,lm){ const t=S.tracks[id]; const p=[];
+  if(t.dur) p.push(fmtDur(t.dur)); if(t.pop!=null) p.push("POP "+t.pop); const l=labelOf(id,lm); if(l) p.push(esc(l.length>28?l.slice(0,27)+"…":l));
+  return p.length?`<div class="sub">${p.join(" · ")}</div>`:""; }
 function renderCands(keepSel){
   if(!S.now){ return; }
   if(!keepSel) sel=0;
   const list=suggest(); const top=list.slice(0,60);
   $("#candInfo").textContent = `候補 ${list.length}曲`;
   if(!top.length){ $("#cands").innerHTML=`<div class="empty">条件に合う候補がありません。フィルタを緩めるか、この曲を含むプレイリストを読み込んでください。</div>`; return; }
-  const max=top[0].sc;
+  const max=top[0].sc, lm=labelMap();
   $("#cands").innerHTML = top.map((c,i)=>{ const t=S.tracks[c.id]; const m=S.meta[c.id]||{};
     return `<div class="cand${i===sel?" sel":""}" data-i="${i}" data-id="${c.id}"><span class="sc">${Math.round(c.sc/max*100)}</span><img src="${esc(t.img)}" alt="" loading="lazy">
-      <div><div class="nm">${esc(t.name)}</div><div class="muted">${esc(arts(t))}</div><div class="chips">${c.chips.map(([k,x])=>`<span class="chip ${k}">${esc(x)}</span>`).join("")}</div></div>
+      <div><div class="nm">${esc(t.name)}</div><div class="muted">${esc(arts(t))}</div>${subLine(c.id,lm)}<div class="chips">${c.chips.map(([k,x])=>`<span class="chip ${k}">${esc(x)}</span>`).join("")}</div></div>
       <span class="meta">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="meta" style="color:var(--accent2)">${m.key||"—"}</span>
       <span class="acts"><button class="sm" data-c="${c.id}" title="曲名をコピー（rekordboxの検索に貼り付け）">⎘</button><button class="sm" data-q="${c.id}">キュー</button><button class="sm" data-p="${c.id}">再生</button><button class="sm" data-n="${c.id}">Nowへ</button></span></div>`; }).join("");
 }
@@ -613,12 +624,17 @@ let rbRunning=false;
 const RB_RETRY=30*864e5;
 function rbTodo(ids){ const now=Date.now();
   return (ids||Object.keys(S.tracks)).filter(id=>{ if(!S.tracks[id]) return false; const m=S.meta[id]||{};
-    if(SRC_RANK[m.src||""]>=SRC_RANK.reccobeats && m.src!=="reccobeats") return false;  // 手入力・rekordbox・Exportify は触らない
+    if(SRC_RANK[m.src||""]>=SRC_RANK.reccobeats && m.src!=="reccobeats" && m.key && m.bpm) return false;  // 手入力・rekordbox・Exportify で揃っている曲は触らない
     const c=S.rb[id]; if(c===1) return false; if(c && now-c<RB_RETRY) return false; return true; }); }
 function rbApply(id,f){
   const cur=S.meta[id]||{}; const bpm=f.tempo>0?Math.round(f.tempo*10)/10:0;
   const pc=Number.isInteger(f.key)?f.key:-1; const key=(pc>=0&&pc<=11)?((f.mode===0?PC_MIN:PC_MAJ)[pc]+(f.mode===0?"A":"B")):null;
   if(!bpm && !key) return false;
+  if(SRC_RANK[cur.src||""]>=SRC_RANK.reccobeats && cur.src!=="reccobeats"){  // 上位の値は残し、空いている所だけ埋める
+    const v={...cur}; let ch=false;
+    if(!cur.key && key){ v.key=key; v.kSrc="reccobeats"; ch=true; }
+    if(!cur.bpm && bpm){ v.bpm=bpm; v.bSrc="reccobeats"; ch=true; }
+    if(ch) S.meta[id]=v; return ch; }
   const v={...cur,src:"reccobeats"}; if(bpm) v.bpm=bpm; if(key) v.key=key;
   const af={...(cur.af||{})}; if(f.energy!=null) af.en=f.energy; if(f.danceability!=null) af.da=f.danceability; if(f.valence!=null) af.va=f.valence; if(f.loudness!=null) af.lo=f.loudness;
   if(Object.keys(af).length) v.af=af;
@@ -948,7 +964,9 @@ async function importXml(file){
     if(S.meta[t.id]?.src==="manual") continue;
     let v=null; for(const a of t.artists){ v=exact.get(norm(a.name)+"|"+norm(t.name)); if(v) break; }
     if(!v) for(const a of t.artists){ v=loose.get(normLoose(a.name)+"|"+normLoose(t.name)); if(v) break; }
-    if(v){ S.meta[t.id]={...v,src:"rekordbox"}; hit++; }
+    if(v){ const cur=S.meta[t.id]||{}; const n={...v,src:"rekordbox"};
+      if(!n.key && cur.key){ n.key=cur.key; n.kSrc=cur.kSrc||cur.src; } if(!n.bpm && cur.bpm){ n.bpm=cur.bpm; n.bSrc=cur.bSrc||cur.src; } if(!n.genre && cur.genre) n.genre=cur.genre; if(cur.af) n.af=cur.af;
+      S.meta[t.id]=n; hit++; }
   }
   await DB.set("meta",S.meta);
   $("#xmlMsg").textContent=`rekordbox ${rows.length}曲中、Spotifyの曲 ${hit}曲と一致しました`; refresh(); autoSync();
