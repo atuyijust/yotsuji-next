@@ -213,6 +213,10 @@
     <p class="muted">rekordboxで「ファイル → ライブラリをxml形式でエクスポート」した XML を読み込むと、曲名＋アーティスト名で照合して BPM・キー・ジャンルを付けます。手入力した値は上書きしません。</p>
     <input type="file" id="xml" accept=".xml">
     <div class="muted" id="xmlMsg"></div>
+    <h2 style="margin-top:14px">3b. BPM・キーの取り込み（Exportify）</h2>
+    <p class="muted"><a href="https://exportify.app/" target="_blank" rel="noopener" style="color:var(--accent)">exportify.app ↗</a> で歯車から「Include audio features data」をオンにして書き出した CSV（複数可。「Export All」のZIPは展開してから）を読み込むと、Spotifyの曲IDで直接照合して BPM・キー・ジャンル・エネルギー等を付けます。rekordbox・手入力の値がある曲には触れません。</p>
+    <input type="file" id="csv" accept=".csv,text/csv" multiple>
+    <div class="muted" id="csvMsg"></div>
 
     <h2>4. BPMの自動補完（Deezer）</h2>
     <p class="muted">SpotifyからはBPMが取れないため、BPMが分からない曲をDeezerで調べて補います（キーは取れません）。rekordbox・手入力の値がある曲には触れません。</p>
@@ -472,7 +476,7 @@ function renderDeck(){
   const m=S.meta[t.id]||{};
   $("#mobileNow").innerHTML=`<b>NOW</b>${esc(t.name)} <span class="muted">— ${esc(arts(t))}</span><span class="m">${m.bpm?m.bpm.toFixed(1):"—"} ${m.key||""}</span>`;
   $("#deck").innerHTML=`<div class="row"><img src="${esc(t.img)}" alt=""><div><div class="t">${esc(t.name)}</div><div class="a">${esc(arts(t))}</div><div class="muted">${esc(t.album)} ${t.year||""}</div></div></div>
-   <div class="bk"><span class="big">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="muted">BPM</span><span class="big k">${m.key||"—"}</span><span class="muted">${m.genre?esc(m.genre):""} ${m.src?"("+({deezer:"Deezer",rekordbox:"rekordbox",manual:"手入力"}[m.src]||m.src)+")":""}</span></div>
+   <div class="bk"><span class="big">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="muted">BPM</span><span class="big k">${m.key||"—"}</span><span class="muted">${m.genre?esc(m.genre):""} ${m.src?"("+(SRC_LABEL[m.src]||m.src)+")":""}</span></div>
    <div class="bk"><input id="eBpm" placeholder="BPM" value="${m.bpm||""}"><input id="eKey" placeholder="キー 8A/Am" value="${m.key||""}"><button class="sm" id="saveMeta">保存</button><button class="sm" id="tap">TAP</button><button class="sm" data-c="${t.id}" title="曲名をコピー">⎘ コピー</button><span class="muted" id="tapv"></span></div>`;
   $("#saveMeta").onclick=()=>{ const bpm=parseFloat($("#eBpm").value)||null; const kRaw=$("#eKey").value.trim(); const key=toCamelot(kRaw);
     if(kRaw && !key){ toast("キーは 8A や Am の形で入力してください"); return; }
@@ -695,7 +699,8 @@ function renderInfo(){
   const dur=sp?.dur||t.dur; if(dur||sp) h+=li("LEN",`${fmtDur(dur)}${sp?.trackNo?` <span class="muted">${sp.disc>1?"Disc"+sp.disc+" ":""}Tr.${sp.trackNo}${sp.total?"/"+sp.total:""}</span>`:""}${sp?.explicit?` <span class="chip r">Explicit</span>`:""}`);
   if(sp) h+=li("POP",`${pb(sp.pop)}<span class="muted">${sp.pop}/100 Spotify人気度</span>`);
   if(m.key){ h+=li("KEY",`${esc(m.key)} <span class="muted">相性: ${CAM_NEIGH(m.key).slice(1).join(" / ")}</span>`); }
-  if(m.bpm){ h+=li("BPM",`${m.bpm.toFixed(1)} <span class="muted">半分 ${(m.bpm/2).toFixed(1)} / 倍 ${(m.bpm*2).toFixed(1)}${m.src?" · "+({deezer:"Deezer",rekordbox:"rekordbox",manual:"手入力"}[m.src]||m.src):""}</span>`); }
+  if(m.bpm){ h+=li("BPM",`${m.bpm.toFixed(1)} <span class="muted">半分 ${(m.bpm/2).toFixed(1)} / 倍 ${(m.bpm*2).toFixed(1)}${m.src?" · "+(SRC_LABEL[m.src]||m.src):""}</span>`); }
+  if(m.af){ const a=m.af; const p=(v)=>v==null?"":Math.round(v*100); h+=li("AF",`<span class="muted">${a.en!=null?`エネルギー ${pb(a.en,1)}${p(a.en)}`:""}${a.da!=null?` · ダンス ${pb(a.da,1)}${p(a.da)}`:""}${a.va!=null?` · 明るさ ${pb(a.va,1)}${p(a.va)}`:""}${a.lo!=null?` · ${a.lo.toFixed(1)} dB`:""}${a.lbl?` · ${esc(a.lbl)}`:""}</span>`); }
   if(sp?.isrc||t.isrc) h+=li("ISRC",`<span class="muted" style="font-family:var(--mono)">${esc(sp?.isrc||t.isrc)}</span>`);
   // アーティスト（Spotify + Wikipedia）
   h+=sec("アーティスト", ex.sp===undefined&&ex.wk===undefined?undefined:(sp||ex.wk||ex.sp)?{}:null, sp?.artists?.[0]?.url, ()=>{
@@ -775,7 +780,8 @@ function syncPayload(){
   const dg={}; for(const [id,v] of Object.entries(S.dg)) if(v) dg[id]=v;
   return {v:1, at:Date.now(), meta, dg, dz:S.dz, plSel:LS.get("plSel",[]), incSaved:LS.get("incSaved",false), dj:LS.get("dj",false), copyMode:LS.get("copyMode","title"),
     weights:Object.fromEntries(["wFlow","wCo","wBpm","wKey","wGen"].map(k=>[k,LS.get(k,null)])), hist:S.hist, now:S.now}; }
-const SRC_RANK={manual:3,rekordbox:2,deezer:1,discogs:1,"":0};
+const SRC_RANK={manual:4,rekordbox:3,exportify:2,deezer:1,discogs:1,"":0};
+const SRC_LABEL={deezer:"Deezer",rekordbox:"rekordbox",exportify:"Exportify",manual:"手入力",discogs:"Discogs"};
 function mergeMeta(remote){
   let changed=0;
   for(const [id,r] of Object.entries(remote.meta||{})){ const l=S.meta[id]||{};
@@ -838,6 +844,42 @@ async function importXml(file){
   await DB.set("meta",S.meta);
   $("#xmlMsg").textContent=`rekordbox ${rows.length}曲中、Spotifyの曲 ${hit}曲と一致しました`; refresh(); autoSync();
 }
+
+// ---------- Exportify CSV ----------
+const PC_MAJ=[8,3,10,5,12,7,2,9,4,11,6,1], PC_MIN=[5,12,7,2,9,4,11,6,1,8,3,10]; // ピッチクラス0-11 → Camelot
+function parseCsv(text){
+  const rows=[]; let row=[], cell="", q=false;
+  for(let i=0;i<text.length;i++){ const c=text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){ cell+='"'; i++; } else q=false; } else cell+=c; }
+    else if(c==='"') q=true; else if(c===','){ row.push(cell); cell=""; } else if(c==='\n'||c==='\r'){ if(c==='\r'&&text[i+1]==='\n') i++; row.push(cell); rows.push(row); row=[]; cell=""; } else cell+=c; }
+  if(cell!==""||row.length){ row.push(cell); rows.push(row); }
+  return rows.filter(r=>r.length>1);
+}
+async function importCsv(files){
+  let total=0, hit=0, withBpm=0, withKey=0, bad=0;
+  for(const file of files){
+    const rows=parseCsv(await file.text()); if(!rows.length){ bad++; continue; }
+    const H=rows[0].map(h=>h.trim().toLowerCase()); const col=n=>H.indexOf(n);
+    const cUri=col("track uri"), cTempo=col("tempo"), cKey=col("key"), cMode=col("mode"), cGen=col("genres"), cEn=col("energy"), cDa=col("danceability"), cVa=col("valence"), cLo=col("loudness"), cLbl=col("record label");
+    if(cUri<0){ bad++; continue; }
+    for(const r of rows.slice(1)){ const id=(r[cUri]||"").replace("spotify:track:",""); if(!id) continue; total++;
+      const bpm=cTempo>=0?Math.round(parseFloat(r[cTempo])*10)/10:0; const pc=cKey>=0?parseInt(r[cKey]):-1; const mode=cMode>=0?parseInt(r[cMode]):1;
+      const key=(pc>=0&&pc<=11)?((mode===0?PC_MIN:PC_MAJ)[pc]+(mode===0?"A":"B")):null;
+      if(!bpm && !key) continue;
+      const cur=S.meta[id]||{}; if(cur.src==="manual"||cur.src==="rekordbox") continue;
+      const v={...cur,src:"exportify"}; if(bpm) v.bpm=bpm; if(key) v.key=key;
+      if(cGen>=0 && r[cGen] && !cur.genre) v.genre=r[cGen].split(",").slice(0,2).map(s=>s.trim()).join("/");
+      const af={}; if(cEn>=0&&r[cEn]!=="") af.en=+r[cEn]; if(cDa>=0&&r[cDa]!=="") af.da=+r[cDa]; if(cVa>=0&&r[cVa]!=="") af.va=+r[cVa]; if(cLo>=0&&r[cLo]!=="") af.lo=+r[cLo]; if(cLbl>=0&&r[cLbl]) af.lbl=r[cLbl];
+      if(Object.keys(af).length) v.af=af;
+      S.meta[id]=v; hit++; if(bpm) withBpm++; if(key) withKey++;
+    }
+  }
+  await DB.set("meta",S.meta);
+  const inLib=Object.keys(S.meta).filter(k=>S.meta[k].src==="exportify"&&S.tracks[k]).length;
+  $("#csvMsg").textContent=bad&&!hit?`Exportify形式のCSVではないようです（「Track URI」列がありません）`:`CSV ${total}曲中 ${hit}曲に付与（BPM ${withBpm} / キー ${withKey}）。うちライブラリ内 ${inLib}曲${bad?`、読めないファイル ${bad}`:""}`;
+  refresh(); autoSync();
+}
+$("#csv").onchange=e=>e.target.files.length&&importCsv([...e.target.files]).catch(err=>$("#csvMsg").textContent="読み込み失敗："+err.message);
 
 // ---------- 検索 ----------
 function doSearch(){
