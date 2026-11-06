@@ -179,7 +179,17 @@
     <label class="ck"><input type="checkbox" id="autoDz" checked> プレイリスト読み込み後に自動で実行</label>
     <div style="margin-top:6px"><button id="runDz">今すぐBPMを補完</button> <span class="muted" id="dzMsg"></span></div>
 
-    <h2>5. バックアップ</h2>
+    <h2>5. 端末間で同期（GitHub Gist）</h2>
+    <p class="muted">BPM・キー・ジャンル・Discogs情報・プレイリストの選択・重み・履歴を、あなたのGitHubの非公開Gistに保存して、MacとiPhoneで共有します。曲データそのものは同期せず、各端末でSpotifyから読み込みます。<br>
+    トークンは <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noopener" style="color:var(--accent)">GitHubの設定</a> で「Gists: Read and write」だけ付けて発行してください。この端末のブラウザにだけ保存されます。</p>
+    <div style="display:flex;gap:8px;margin-bottom:6px"><input id="ghTok" type="password" placeholder="github_pat_…" style="flex:1;font-family:var(--mono)"><button id="saveTok">保存</button></div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button id="syncPush">今すぐ送る</button><button id="syncPull">今すぐ受け取る</button>
+      <label class="ck"><input type="checkbox" id="autoSync" checked> 自動で同期</label>
+      <span class="muted" id="syncMsg"></span>
+    </div>
+
+    <h2>6. バックアップ（ファイル）</h2>
     <button id="metaOut">BPM・キーの手入力データを書き出す</button>
     <label><button id="metaInBtn">読み込む</button><input type="file" id="metaIn" accept=".json" hidden></label>
   </div>
@@ -327,7 +337,7 @@ async function scan(){
     await persist(); buildIndex(); renderPlList();
     $("#scanMsg").textContent=`完了：プレイリスト ${S.playlists.length}本 / 曲 ${Object.keys(S.tracks).length}`;
     refresh();
-    if($("#autoDz").checked) fillBpm();
+    if($("#autoDz").checked) fillBpm(); else autoSync();
   }catch(e){ $("#scanMsg").textContent="中断："+e.message; S.playlists=[...next, ...S.playlists.filter(p=>!next.find(n=>n.id===p.id))]; await persist(); buildIndex(); }
 }
 async function persist(){ await DB.set("tracks",S.tracks); await DB.set("playlists",S.playlists); await DB.set("saved",S.saved); await DB.set("meta",S.meta); }
@@ -424,7 +434,7 @@ function renderDeck(){
    <div class="bk"><input id="eBpm" placeholder="BPM" value="${m.bpm||""}"><input id="eKey" placeholder="キー 8A/Am" value="${m.key||""}"><button class="sm" id="saveMeta">保存</button><button class="sm" id="tap">TAP</button><button class="sm" data-c="${t.id}" title="曲名をコピー">⎘ コピー</button><span class="muted" id="tapv"></span></div>`;
   $("#saveMeta").onclick=()=>{ const bpm=parseFloat($("#eBpm").value)||null; const kRaw=$("#eKey").value.trim(); const key=toCamelot(kRaw);
     if(kRaw && !key){ toast("キーは 8A や Am の形で入力してください"); return; }
-    S.meta[t.id]={...(S.meta[t.id]||{}),bpm,key,src:"manual"}; DB.set("meta",S.meta); refresh(); };
+    S.meta[t.id]={...(S.meta[t.id]||{}),bpm,key,src:"manual"}; DB.set("meta",S.meta); refresh(); autoSync(); };
   let taps=[]; $("#tap").onclick=()=>{ const n=performance.now(); if(taps.length && n-taps[taps.length-1]>2000) taps=[]; taps.push(n); taps=taps.slice(-9);
     if(taps.length>=4){ const iv=(taps[taps.length-1]-taps[0])/(taps.length-1); const b=60000/iv; $("#eBpm").value=b.toFixed(1); $("#tapv").textContent=`${taps.length}回`; } else $("#tapv").textContent=`${taps.length}回…`; };
 }
@@ -507,7 +517,7 @@ async function fillBpm(ids, label="Deezer"){
     dzRunning=false; await DB.set("meta",S.meta); await DB.set("dz",S.dz);
     if(todo.length>1) setStatus(`DeezerでBPM取得完了：${todo.length}曲中 ${got}曲`);
     if($("#dzMsg")) $("#dzMsg").textContent=`前回：${todo.length}曲を確認し ${got}曲のBPMを取得`;
-    refresh();
+    refresh(); if(todo.length) autoSync();
   }
 }
 
@@ -569,6 +579,62 @@ function renderInfo(){
   box.innerHTML=h;
 }
 
+// ---------- GitHub Gist 同期 ----------
+const SYNC_FILE="yotsuji-next-sync.json";
+function syncMsg(m){ setStatus(m); if($("#syncMsg")) $("#syncMsg").textContent=m; }
+async function gh(path,opt={}){ const tok=LS.get("ghTok",""); if(!tok) throw new Error("トークン未設定");
+  const r=await fetch("https://api.github.com"+path,{...opt,headers:{Authorization:"Bearer "+tok,Accept:"application/vnd.github+json","Content-Type":"application/json",...(opt.headers||{})}});
+  if(r.status===401) throw new Error("トークンが無効です"); if(r.status===403) throw new Error("権限不足（GistsをRead and writeに）");
+  if(!r.ok && r.status!==404) throw new Error("GitHub "+r.status); return r; }
+async function findGist(){ let id=LS.get("gistId",""); if(id){ const r=await gh("/gists/"+id); if(r.ok) return id; }
+  for(let p=1;p<=5;p++){ const r=await gh("/gists?per_page=100&page="+p); const j=await r.json(); if(!j.length) break;
+    const g=j.find(x=>x.files&&x.files[SYNC_FILE]); if(g){ LS.set("gistId",g.id); return g.id; } }
+  return null; }
+function syncPayload(){
+  const meta={}; for(const [id,m] of Object.entries(S.meta)){ if(m.bpm||m.key||m.genre) meta[id]={bpm:m.bpm||0,key:m.key||"",genre:m.genre||"",src:m.src||""}; }
+  const dg={}; for(const [id,v] of Object.entries(S.dg)) if(v) dg[id]=v;
+  return {v:1, at:Date.now(), meta, dg, dz:S.dz, plSel:LS.get("plSel",[]), incSaved:LS.get("incSaved",false), dj:LS.get("dj",false), copyMode:LS.get("copyMode","title"),
+    weights:Object.fromEntries(["wFlow","wCo","wBpm","wKey","wGen"].map(k=>[k,LS.get(k,null)])), hist:S.hist, now:S.now}; }
+const SRC_RANK={manual:3,rekordbox:2,deezer:1,discogs:1,"":0};
+function mergeMeta(remote){
+  let changed=0;
+  for(const [id,r] of Object.entries(remote.meta||{})){ const l=S.meta[id]||{};
+    const rr=SRC_RANK[r.src]||0, lr=SRC_RANK[l.src]||0; const n={...l};
+    if(r.bpm && (!l.bpm || rr>lr)) n.bpm=r.bpm; if(r.key && (!l.key || rr>lr)) n.key=r.key; if(r.genre && (!l.genre || rr>lr)) n.genre=r.genre;
+    if(rr>lr || !l.src) n.src=r.src||l.src;
+    if(JSON.stringify(n)!==JSON.stringify(l)){ S.meta[id]=n; changed++; } }
+  for(const [id,v] of Object.entries(remote.dg||{})) if(!S.dg[id]) S.dg[id]=v;
+  for(const [id,v] of Object.entries(remote.dz||{})) if(!(id in S.dz)) S.dz[id]=v;
+  return changed; }
+let syncing=false, syncQueued=false;
+async function syncPush(){
+  if(!LS.get("ghTok","")) return; if(syncing){ syncQueued=true; return; } syncing=true;
+  try{ syncMsg("同期：送信中…"); let id=await findGist();
+    // 送る前に受け取って合成（上書き事故を防ぐ）
+    if(id){ const g=await (await gh("/gists/"+id)).json(); const f=g.files[SYNC_FILE]; if(f){ let txt=f.content; if(f.truncated) txt=await (await fetch(f.raw_url)).text(); try{ mergeMeta(JSON.parse(txt)); }catch{} } }
+    const body={description:"四辻 NEXT 同期データ",public:false,files:{[SYNC_FILE]:{content:JSON.stringify(syncPayload())}}};
+    const r=await gh(id?"/gists/"+id:"/gists",{method:id?"PATCH":"POST",body:JSON.stringify(body)}); const j=await r.json(); LS.set("gistId",j.id); LS.set("lastSync",Date.now());
+    await DB.set("meta",S.meta); await DB.set("dg",S.dg); await DB.set("dz",S.dz);
+    syncMsg("同期：送信しました "+new Date().toLocaleTimeString()); }
+  catch(e){ syncMsg("同期エラー："+e.message); }
+  finally{ syncing=false; if(syncQueued){ syncQueued=false; setTimeout(syncPush,3000); } }
+}
+async function syncPull(applySettings){
+  if(!LS.get("ghTok","")) return; if(syncing) return; syncing=true;
+  try{ syncMsg("同期：受信中…"); const id=await findGist(); if(!id){ syncMsg("同期：まだデータがありません（この端末から「今すぐ送る」）"); return; }
+    const g=await (await gh("/gists/"+id)).json(); const f=g.files[SYNC_FILE]; let txt=f.content; if(f.truncated) txt=await (await fetch(f.raw_url)).text();
+    const d=JSON.parse(txt); const n=mergeMeta(d);
+    if(applySettings){ if(d.plSel&&!LS.get("plSel",[]).length) LS.set("plSel",d.plSel); if(d.incSaved!=null&&LS.get("incSaved",null)==null) LS.set("incSaved",d.incSaved);
+      for(const [k,v] of Object.entries(d.weights||{})) if(v!=null && LS.get(k,null)==null) LS.set(k,v);
+      if(d.copyMode && !localStorage.getItem("copyMode")) LS.set("copyMode",d.copyMode);
+      if(!S.hist.length && d.hist?.length){ S.hist=d.hist; LS.set("hist",S.hist); } if(!S.now && d.now){ S.now=d.now; LS.set("now",S.now); } }
+    await DB.set("meta",S.meta); await DB.set("dg",S.dg); await DB.set("dz",S.dz); LS.set("lastSync",Date.now());
+    syncMsg(`同期：受信しました（${n}曲を更新）`); refresh(); }
+  catch(e){ syncMsg("同期エラー："+e.message); }
+  finally{ syncing=false; }
+}
+function autoSync(){ if(LS.get("autoSync",true) && LS.get("ghTok","")) setTimeout(syncPush,1500); }
+
 // ---------- rekordbox XML ----------
 function norm(s){ return String(s||"").toLowerCase().normalize("NFKC")
   .replace(/\((original|extended)( mix)?\)|- (original|extended)( mix)?$/g,"").replace(/\s*[\(\[]?(feat\.?|ft\.?)[^\)\]]*[\)\]]?/g,"")
@@ -590,7 +656,7 @@ async function importXml(file){
     if(v){ S.meta[t.id]={...v,src:"rekordbox"}; hit++; }
   }
   await DB.set("meta",S.meta);
-  $("#xmlMsg").textContent=`rekordbox ${rows.length}曲中、Spotifyの曲 ${hit}曲と一致しました`; refresh();
+  $("#xmlMsg").textContent=`rekordbox ${rows.length}曲中、Spotifyの曲 ${hit}曲と一致しました`; refresh(); autoSync();
 }
 
 // ---------- 検索 ----------
@@ -633,7 +699,7 @@ function setDj(on){ document.body.classList.toggle("dj",on); LS.set("dj",on); $(
 $("#djMode").onchange=e=>setDj(e.target.checked);
 
 // ---------- UI配線 ----------
-function openLib(){ $("#redir").textContent=REDIRECT; $("#cid").value=LS.get("cid",""); $("#incSaved").checked=LS.get("incSaved",false); renderPlList(); $("#dlgLib").showModal(); }
+function openLib(){ $("#redir").textContent=REDIRECT; $("#cid").value=LS.get("cid",""); $("#ghTok").value=LS.get("ghTok","")?"••••••••":""; $("#ghTok").placeholder=LS.get("ghTok","")?"保存済み（変えるときだけ入力）":"github_pat_…"; $("#incSaved").checked=LS.get("incSaved",false); renderPlList(); $("#dlgLib").showModal(); }
 document.addEventListener("click",e=>{
   const b=e.target.closest("[data-q],[data-p],[data-n],[data-c]"); if(!b) return;
   if(b.dataset.c){ copyTrack(b.dataset.c,b); }
@@ -653,6 +719,9 @@ $("#runDz").onclick=()=>fillBpm();
 $("#autoDz").checked=LS.get("autoDz",true); $("#autoDz").onchange=e=>LS.set("autoDz",e.target.checked);
 $("#metaOut").onclick=()=>{ const man=Object.fromEntries(Object.entries(S.meta).filter(([,v])=>v.src==="manual"));
   const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([JSON.stringify(man)],{type:"application/json"})); a.download="yotsuji-next-meta.json"; a.click(); };
+$("#saveTok").onclick=()=>{ const v=$("#ghTok").value.trim(); if(v && !/^•+$/.test(v)){ LS.set("ghTok",v); LS.set("gistId",""); toast("トークンを保存しました"); syncPull(true); } };
+$("#syncPush").onclick=()=>syncPush(); $("#syncPull").onclick=()=>syncPull(true);
+$("#autoSync").checked=LS.get("autoSync",true); $("#autoSync").onchange=e=>LS.set("autoSync",e.target.checked);
 $("#metaInBtn").onclick=()=>$("#metaIn").click();
 $("#metaIn").onchange=async e=>{ const f=e.target.files[0]; if(!f) return; Object.assign(S.meta, JSON.parse(await f.text())); await DB.set("meta",S.meta); toast("読み込みました"); refresh(); };
 $("#q").oninput=doSearch;
@@ -677,6 +746,7 @@ $("#copyMode").value=LS.get("copyMode","title"); $("#copyMode").onchange=e=>LS.s
     if(LS.get("follow",false) && !LS.get("dj",false)){ $("#follow").checked=true; setFollow(true); } }
   if(!S.playlists.length && !LS.get("cid","")) openLib();
   refresh();
+  if(LS.get("autoSync",true) && LS.get("ghTok","")) syncPull(true);
 })();
 </script>
 </body>
