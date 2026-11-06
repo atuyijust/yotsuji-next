@@ -78,6 +78,16 @@
   .cand.sel{background:#16201d;outline:1px solid #2c4a41}
   body.dj [data-q], body.dj [data-p]{display:none}
   [data-c]{font-family:var(--mono)}
+  .info{margin-top:10px;font-size:12px}
+  .info h3{font:600 10px var(--mono);letter-spacing:.12em;color:var(--dim);margin:10px 0 4px;text-transform:uppercase}
+  .info .row2{display:flex;gap:6px;flex-wrap:wrap}
+  .info .ln{padding:2px 0;border-bottom:1px dashed var(--line);display:flex;gap:6px;align-items:baseline}
+  .info .ln .pre{color:var(--dim);font-family:var(--mono);font-size:10px;min-width:30px}
+  .info .ln a,.info .ln span.t{cursor:pointer}
+  .info .ln span.t:hover{color:var(--accent)}
+  .info .muted{font-size:11px}
+  details.info summary{cursor:pointer;color:var(--dim);font:600 10px var(--mono);letter-spacing:.12em;list-style:none}
+  details.info summary::before{content:"▸ "} details.info[open] summary::before{content:"▾ "}
   [data-c].ok{color:var(--accent);border-color:var(--accent)}
   body.dj [data-n]{background:var(--accent);color:#08110e;border-color:var(--accent);font-weight:600;padding:6px 14px;font-size:13px}
   body.dj .follow-row{opacity:.4;pointer-events:none}
@@ -101,6 +111,7 @@
   <aside>
     <h2>Now Playing</h2>
     <div class="deck" id="deck"><div class="muted">曲が未選択です。下の検索か、Spotifyの再生追従で選んでください。</div></div>
+    <details class="info" id="info" open><summary>この曲について</summary><div id="infoBody" class="muted">—</div></details>
     <div class="bk follow-row">
       <label class="ck"><input type="checkbox" id="follow"> Spotifyの再生中を追従</label>
     </div>
@@ -202,6 +213,7 @@ const S = {
   saved:[],         // お気に入りの曲ID
   meta:{},          // id -> {bpm,key,genre,src}
   dz:{},            // Deezer問い合わせ済み id -> bpm(0=不明)
+  dg:{},            // Discogs情報 id -> {genre,style,label,year,url} / null=見つからず
   occ:{},           // id -> [[plIdx,pos],...]
   now:null, hist:[], me:null, lastPlayingId:null
 };
@@ -433,7 +445,7 @@ function renderCands(keepSel){
       <span class="meta">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="meta" style="color:var(--accent2)">${m.key||"—"}</span>
       <span class="acts"><button class="sm" data-c="${c.id}" title="曲名をコピー（rekordboxの検索に貼り付け）">⎘</button><button class="sm" data-q="${c.id}">キュー</button><button class="sm" data-p="${c.id}">再生</button><button class="sm" data-n="${c.id}">Nowへ</button></span></div>`; }).join("");
 }
-function refresh(){ renderDeck(); renderHist(); renderCands(); }
+function refresh(){ renderDeck(); renderHist(); renderCands(); renderInfo(); }
 
 function setNow(id, push=true){
   if(!S.tracks[id]) return;
@@ -497,6 +509,60 @@ async function fillBpm(ids, label="Deezer"){
     if($("#dzMsg")) $("#dzMsg").textContent=`前回：${todo.length}曲を確認し ${got}曲のBPMを取得`;
     refresh();
   }
+}
+
+// ---------- Discogs ----------
+function cleanTitle(n){ return String(n||"").replace(/\s*[\(\[].*?[\)\]]/g,"").replace(/ - .*$/,"").trim(); }
+async function discogsInfo(id){
+  if(id in S.dg) return S.dg[id];
+  const t=S.tracks[id]; if(!t) return null;
+  const tries=[t.artists[0]?.name+" "+t.name, t.artists[0]?.name+" "+cleanTitle(t.name)];
+  let v=null;
+  for(const q of tries){
+    try{ const r=await fetch("https://api.discogs.com/database/search?q="+encodeURIComponent(q)+"&type=release&per_page=5",{headers:{Accept:"application/json"}});
+      if(r.status===429){ setStatus("Discogsの上限（25回/分）に達しました。少し待ちます"); break; }
+      if(!r.ok) break; const j=await r.json(); const hit=(j.results||[]).find(x=>x.genre||x.style)||(j.results||[])[0];
+      if(hit){ v={genre:hit.genre||[],style:hit.style||[],label:(hit.label||[]).slice(0,2),year:hit.year||"",country:hit.country||"",url:hit.uri?"https://www.discogs.com"+hit.uri:""}; break; }
+    }catch(e){ break; }
+  }
+  S.dg[id]=v; DB.set("dg",S.dg);
+  // ジャンルが空ならDiscogsのスタイルを使う（rekordbox・手入力は上書きしない）
+  if(v && !S.meta[id]?.genre && (v.style.length||v.genre.length)){ S.meta[id]={...(S.meta[id]||{}),genre:(v.style.length?v.style:v.genre).join("/"),src:S.meta[id]?.src||"discogs"}; DB.set("meta",S.meta); }
+  return v;
+}
+const CAM_NEIGH = k => { const m=k&&k.match(/^(\d+)([AB])$/); if(!m) return []; const n=+m[1],l=m[2]; const w=x=>((x-1+12)%12)+1;
+  return [k, n+(l==="A"?"B":"A"), w(n-1)+l, w(n+1)+l]; };
+function renderInfo(){
+  const id=S.now, t=S.tracks[id], box=$("#infoBody"); if(!t){ box.innerHTML="—"; return; }
+  const m=S.meta[id]||{}; const li=(pre,html)=>`<div class="ln"><span class="pre">${pre}</span><span>${html}</span></div>`;
+  const tl=x=>`<span class="t" data-n="${x}">${esc(S.tracks[x]?.name||"")}</span> <span class="muted">${esc(arts(S.tracks[x]||{artists:[]}))}</span>`;
+  let h="";
+  // 基本
+  h+=`<h3>基本</h3>`+li("ALB",esc(t.album)+(t.year?` <span class="muted">(${t.year})</span>`:""));
+  if(m.key){ h+=li("KEY",`${esc(m.key)} <span class="muted">相性: ${CAM_NEIGH(m.key).slice(1).join(" / ")}</span>`); }
+  if(m.bpm){ h+=li("BPM",`${m.bpm.toFixed(1)} <span class="muted">半分 ${(m.bpm/2).toFixed(1)} / 倍 ${(m.bpm*2).toFixed(1)}</span>`); }
+  // Discogs
+  const d=S.dg[id];
+  if(d===undefined){ h+=`<h3>Discogs</h3><div class="muted">取得中…</div>`; discogsInfo(id).then(()=>{ if(S.now===id) renderInfo(); }); }
+  else if(d===null){ h+=`<h3>Discogs</h3><div class="muted">見つかりませんでした</div>`; }
+  else { h+=`<h3>Discogs</h3>`; if(d.style.length||d.genre.length) h+=li("STY",esc([...d.style,...d.genre.filter(g=>!d.style.length)].join(" / ")));
+    if(d.label.length) h+=li("LBL",esc(d.label.join(", "))+(d.year?` <span class="muted">${d.year}${d.country?" "+esc(d.country):""}</span>`:""));
+    if(d.url) h+=li("",`<a href="${esc(d.url)}" target="_blank" rel="noopener" style="color:var(--dim)">Discogsで開く ↗</a>`); }
+  // プレイリスト内の前後
+  const occ=S.occ[id]||[];
+  if(occ.length){ h+=`<h3>プレイリストでの前後（${occ.length}本）</h3>`;
+    for(const [pi,pos] of occ.slice(0,6)){ const p=S.playlists[pi]; const pv=p.ids[pos-1], nx=p.ids[pos+1];
+      h+=`<div class="ln"><span class="pre">PL</span><span><span class="muted">${esc(p.name)}</span>${pv?`<br>← ${tl(pv)}`:""}${nx?`<br>→ ${tl(nx)}`:""}</span></div>`; }
+    if(occ.length>6) h+=`<div class="muted">…ほか ${occ.length-6}本</div>`; }
+  else h+=`<h3>プレイリスト</h3><div class="muted">読み込んだプレイリストには入っていません</div>`;
+  // 履歴での前後
+  const seq=[...S.hist,S.now]; const hs=[];
+  for(let i=0;i<S.hist.length;i++){ if(S.hist[i]===id){ if(S.hist[i-1]) hs.push("← "+tl(S.hist[i-1])); if(seq[i+1]&&seq[i+1]!==id) hs.push("→ "+tl(seq[i+1])); } }
+  if(hs.length) h+=`<h3>今回のセットでの前後</h3>`+hs.map(x=>li("",x)).join("");
+  // 同じアーティストの曲数
+  const aid=new Set(t.artists.map(a=>a.id)); const same=Object.values(S.tracks).filter(x=>x.id!==id&&x.artists.some(a=>aid.has(a.id))).length;
+  if(same) h+=`<h3>同じアーティスト</h3><div class="muted">ライブラリに他 ${same}曲（検索欄に「${esc(t.artists[0].name)}」で一覧）</div>`;
+  box.innerHTML=h;
 }
 
 // ---------- rekordbox XML ----------
@@ -598,7 +664,7 @@ $("#copyMode").value=LS.get("copyMode","title"); $("#copyMode").onchange=e=>LS.s
 (async()=>{
   await DB.open();
   S.tracks=await DB.get("tracks")||{}; S.playlists=await DB.get("playlists")||[]; S.saved=await DB.get("saved")||[];
-  S.meta=await DB.get("meta")||{}; S.dz=await DB.get("dz")||{}; S.plIndex=await DB.get("plIndex")||[];
+  S.meta=await DB.get("meta")||{}; S.dz=await DB.get("dz")||{}; S.dg=await DB.get("dg")||{}; S.plIndex=await DB.get("plIndex")||[];
   S.hist=LS.get("hist",[]); S.now=LS.get("now",null);
   buildIndex();
   try{ await handleRedirect(); }catch(e){ toast("認証失敗："+e.message); }
