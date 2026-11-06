@@ -95,6 +95,42 @@
   body.dj #djBadge{display:inline}
   .keys{font:11px var(--mono);color:var(--dim);margin-left:auto}
   .keys b{color:var(--text);font-weight:500;border:1px solid var(--line);border-radius:3px;padding:0 4px}
+  .info .src{display:flex;justify-content:space-between;align-items:baseline}
+  .info .src a{color:var(--dim);font-size:10px;text-decoration:none}
+  .info .pb{display:inline-block;width:60px;height:5px;background:var(--line);border-radius:3px;vertical-align:middle;margin:0 4px}
+  .info .pb i{display:block;height:100%;background:var(--accent);border-radius:3px}
+  .info .ex{color:var(--text);font-size:11px;line-height:1.45;margin:2px 0}
+  .info .vl{padding:2px 0;border-bottom:1px dashed var(--line);display:flex;gap:6px;align-items:baseline;cursor:pointer}
+  .info .vl:hover{color:var(--accent)}
+  .info .vl .d{font-family:var(--mono);color:var(--dim);font-size:10px;margin-left:auto;white-space:nowrap}
+  details.side summary{list-style:none;cursor:pointer;margin:18px 0 8px}
+  details.side summary::-webkit-details-marker{display:none}
+  details.side summary h2{display:inline;margin:0}
+  details.side summary::before{content:"▾ ";color:var(--dim);font-size:10px} details.side:not([open]) summary::before{content:"▸ "}
+  #mobileNow{display:none}
+  @media (max-width:760px){
+    header{flex-wrap:wrap;gap:8px 12px;padding:8px 12px}
+    header .sp{display:none}
+    #status{width:100%;order:9}
+    main{display:block;height:auto}
+    aside{border-right:0;border-bottom:1px solid var(--line);padding:12px}
+    section.list{padding:0 12px 10px}
+    input,select{font-size:16px}
+    .filters{gap:6px 10px;padding-top:8px}
+    .keys{display:none}
+    .cand{grid-template-columns:30px 1fr;gap:4px 8px;padding:8px 4px}
+    .cand img,.cand .meta{display:none}
+    .cand .acts{grid-column:1 / -1;grid-row:2;justify-content:flex-end}
+    .cand .acts button{padding:6px 10px;font-size:12px}
+    .deck img{width:52px;height:52px}
+    dialog{width:100vw;height:100vh;max-height:100vh;max-width:100vw;border-radius:0}
+    dialog .in{max-height:calc(100vh - 60px);padding:14px}
+    dialog .in > div[style*="display:flex"]{flex-wrap:wrap}
+    dialog .in > div[style*="display:flex"] > input{flex:1 1 100% !important;min-width:0;order:-1}
+    #mobileNow{display:block;position:sticky;top:0;z-index:5;background:var(--panel);border-bottom:1px solid var(--line);padding:7px 12px;font-size:12px;margin:0 -12px}
+    #mobileNow b{color:var(--accent);font-family:var(--mono);margin-right:6px}
+    #mobileNow .m{font-family:var(--mono);color:var(--accent2);margin-left:6px}
+  }
 </style>
 </head>
 <body>
@@ -115,24 +151,28 @@
     <div class="bk follow-row">
       <label class="ck"><input type="checkbox" id="follow"> Spotifyの再生中を追従</label>
     </div>
+    <div class="bk"><label class="ck" title="Spotify / Deezer / MusicBrainz / Discogs / Wikipedia から曲・アーティスト情報を自動で集めます"><input type="checkbox" id="autoInfo" checked> 曲情報を自動収集</label></div>
 
     <h2>ライブラリから選ぶ</h2>
     <input id="q" placeholder="曲名・アーティストで検索（/ で移動、Enterで決定）" style="width:100%">
     <div class="search-res" id="sres"></div>
 
-    <h2>重み付け</h2>
+    <details class="side" id="dWeights" open><summary><h2>重み付け</h2></summary>
     <div class="sl"><span>自分の流れ</span><input type="range" min="0" max="5" step="0.5" id="wFlow" value="3"><span></span></div>
     <div class="sl"><span>同じPL</span><input type="range" min="0" max="5" step="0.5" id="wCo" value="2"><span></span></div>
     <div class="sl"><span>BPM</span><input type="range" min="0" max="5" step="0.5" id="wBpm" value="2"><span></span></div>
     <div class="sl"><span>キー</span><input type="range" min="0" max="5" step="0.5" id="wKey" value="1.5"><span></span></div>
     <div class="sl"><span>ジャンル</span><input type="range" min="0" max="5" step="0.5" id="wGen" value="1"><span></span></div>
+    </details>
 
-    <h2>セット履歴 <button class="sm" id="btnExport" style="float:right">プレイリスト化</button></h2>
+    <details class="side" id="dHist" open><summary><h2>セット履歴</h2></summary>
     <div class="hist" id="hist"><div class="muted">まだありません</div></div>
-    <div style="margin-top:8px"><button class="sm" id="btnClearHist">履歴をクリア</button></div>
+    <div style="margin-top:8px;display:flex;gap:6px"><button class="sm" id="btnExport">プレイリスト化</button><button class="sm" id="btnClearHist">履歴をクリア</button></div>
+    </details>
   </aside>
 
   <section class="list">
+    <div id="mobileNow"><b>NOW</b><span class="muted">未選択</span></div>
     <div class="filters">
       <label class="ck">BPM幅
         <select id="fBpm"><option value="0">制限なし</option><option value="0.04">±4%</option><option value="0.06" selected>±6%</option><option value="0.1">±10%</option></select>
@@ -224,6 +264,7 @@ const S = {
   meta:{},          // id -> {bpm,key,genre,src}
   dz:{},            // Deezer問い合わせ済み id -> bpm(0=不明)
   dg:{},            // Discogs情報 id -> {genre,style,label,year,url} / null=見つからず
+  ex:{},            // 自動収集した曲情報 id -> {at,done,sp,dz,mb,wk}
   occ:{},           // id -> [[plIdx,pos],...]
   now:null, hist:[], me:null, lastPlayingId:null
 };
@@ -284,7 +325,7 @@ function slimTrack(t){
   if(!t || t.type && t.type!=="track" || !t.id || t.is_local) return null;
   const imgs = t.album?.images||[];
   return {id:t.id, uri:t.uri, name:t.name, artists:(t.artists||[]).map(a=>({id:a.id,name:a.name})),
-    album:t.album?.name||"", isrc:t.external_ids?.isrc||"", img:(imgs[imgs.length-1]||imgs[0]||{}).url||"", year:+(t.album?.release_date||"").slice(0,4)||null};
+    album:t.album?.name||"", albumId:t.album?.id||"", dur:t.duration_ms||0, isrc:t.external_ids?.isrc||"", img:(imgs[imgs.length-1]||imgs[0]||{}).url||"", year:+(t.album?.release_date||"").slice(0,4)||null};
 }
 async function loadPlaylistIndex(){
   if(!S.me) S.me = await api("/me");
@@ -427,8 +468,9 @@ function toast(m){ setStatus(m); }
 
 function renderDeck(){
   const t=S.tracks[S.now];
-  if(!t){ $("#deck").innerHTML=`<div class="muted">曲が未選択です。下の検索か、Spotifyの再生追従で選んでください。</div>`; return; }
+  if(!t){ $("#deck").innerHTML=`<div class="muted">曲が未選択です。下の検索か、Spotifyの再生追従で選んでください。</div>`; $("#mobileNow").innerHTML=`<b>NOW</b><span class="muted">未選択</span>`; return; }
   const m=S.meta[t.id]||{};
+  $("#mobileNow").innerHTML=`<b>NOW</b>${esc(t.name)} <span class="muted">— ${esc(arts(t))}</span><span class="m">${m.bpm?m.bpm.toFixed(1):"—"} ${m.key||""}</span>`;
   $("#deck").innerHTML=`<div class="row"><img src="${esc(t.img)}" alt=""><div><div class="t">${esc(t.name)}</div><div class="a">${esc(arts(t))}</div><div class="muted">${esc(t.album)} ${t.year||""}</div></div></div>
    <div class="bk"><span class="big">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="muted">BPM</span><span class="big k">${m.key||"—"}</span><span class="muted">${m.genre?esc(m.genre):""} ${m.src?"("+({deezer:"Deezer",rekordbox:"rekordbox",manual:"手入力"}[m.src]||m.src)+")":""}</span></div>
    <div class="bk"><input id="eBpm" placeholder="BPM" value="${m.bpm||""}"><input id="eKey" placeholder="キー 8A/Am" value="${m.key||""}"><button class="sm" id="saveMeta">保存</button><button class="sm" id="tap">TAP</button><button class="sm" data-c="${t.id}" title="曲名をコピー">⎘ コピー</button><span class="muted" id="tapv"></span></div>`;
@@ -461,7 +503,9 @@ function setNow(id, push=true){
   if(!S.tracks[id]) return;
   if(push && S.now && S.now!==id){ S.hist.push(S.now); }
   S.now=id; LS.set("now",id); LS.set("hist",S.hist); refresh();
-  if(!S.meta[id]?.bpm && !(id in S.dz)) deezerBpm(S.tracks[id]).then(b=>{ S.dz[id]=b; if(b){ S.meta[id]={...(S.meta[id]||{}),bpm:b,src:"deezer"}; DB.set("meta",S.meta);} DB.set("dz",S.dz); if(S.now===id) refresh(); }).catch(()=>{});
+  if(LS.get("autoInfo",true)) gatherInfo(id);
+  else if(!S.meta[id]?.bpm && !(id in S.dz)) deezerBpm(S.tracks[id]).then(b=>{ S.dz[id]=b; if(b){ S.meta[id]={...(S.meta[id]||{}),bpm:b,src:"deezer"}; DB.set("meta",S.meta);} DB.set("dz",S.dz); if(S.now===id) refresh(); }).catch(()=>{});
+  if(matchMedia("(max-width:760px)").matches) $("#mobileNow").scrollIntoView({block:"start"});
 }
 
 // ---------- 再生操作 ----------
@@ -536,7 +580,7 @@ async function discogsInfo(id){
       const an=norm(a0);
       const ok=(j.results||[]).filter(x=>{ const ti=norm(x.title||""); return an && ti.includes(an); });
       const hit=ok.find(x=>x.style&&x.style.length)||ok[0];
-      if(hit){ v={genre:hit.genre||[],style:hit.style||[],label:(hit.label||[]).slice(0,2),year:hit.year||"",country:hit.country||"",url:hit.uri?"https://www.discogs.com"+hit.uri:""}; break; }
+      if(hit){ v={genre:hit.genre||[],style:hit.style||[],label:[...new Set(hit.label||[])].slice(0,2),year:hit.year||"",country:hit.country||"",url:hit.uri?"https://www.discogs.com"+hit.uri:"",rid:hit.type==="release"?hit.id:0,format:(hit.format||[]).slice(0,3)}; break; }
     }catch(e){ break; }
   }
   S.dg[id]=v; DB.set("dg",S.dg);
@@ -544,24 +588,160 @@ async function discogsInfo(id){
   if(v && !S.meta[id]?.genre && (v.style.length||v.genre.length)){ S.meta[id]={...(S.meta[id]||{}),genre:(v.style.length?v.style:v.genre).join("/"),src:S.meta[id]?.src||"discogs"}; DB.set("meta",S.meta); }
   return v;
 }
+// ---------- 曲情報の自動収集 ----------
+const EX_TTL=1000*60*60*24*14;
+const fmtDur=ms=>ms?`${Math.floor(ms/60000)}:${String(Math.floor(ms%60000/1000)).padStart(2,"0")}`:"";
+const fmtN=n=>n>=1e6?(n/1e6).toFixed(1)+"M":n>=1e3?(n/1e3).toFixed(n>=1e4?0:1)+"k":String(n);
+function saveEx(){ const ks=Object.keys(S.ex); if(ks.length>400){ ks.sort((a,b)=>(S.ex[a].at||0)-(S.ex[b].at||0)); for(const k of ks.slice(0,ks.length-400)) delete S.ex[k]; } DB.set("ex",S.ex); }
+async function gatherInfo(id){
+  const t=S.tracks[id]; if(!t) return;
+  const old=S.ex[id];
+  if(old && old.done && Date.now()-old.at<EX_TTL){ if(S.dg[id]?.rid && !S.dg[id].rel) discogsRelease(id); return; }
+  if(old && old.running) return;
+  const e=S.ex[id]={at:Date.now(),done:false,running:true};
+  const upd=()=>{ if(S.now===id) renderInfo(); };
+  const a0=t.artists[0]||{};
+  const jobs=[];
+  // Spotify: 人気度・リリース・レーベル・アーティスト・トップ曲・別バージョン
+  jobs.push((async()=>{
+    if(!(await token())){ e.sp={err:"Spotify未接続"}; upd(); return; }
+    try{
+      const tr=await api("/tracks/"+id+"?market=from_token");
+      const al=tr.album?.id ? await api("/albums/"+tr.album.id+"?market=from_token").catch(()=>null) : null;
+      const ar=await api("/artists?ids="+t.artists.slice(0,3).map(a=>a.id).filter(Boolean).join(",")).catch(()=>null);
+      e.sp={pop:tr.popularity,dur:tr.duration_ms,explicit:tr.explicit,trackNo:tr.track_number,disc:tr.disc_number,isrc:tr.external_ids?.isrc||t.isrc||"",url:tr.external_urls?.spotify||"",
+        release:al?.release_date||tr.album?.release_date||"",label:al?.label||"",albumType:al?.album_type||tr.album?.album_type||"",total:al?.total_tracks||0,copy:(al?.copyrights||[])[0]?.text||"",albumUrl:al?.external_urls?.spotify||"",
+        artists:(ar?.artists||[]).filter(Boolean).map(a=>({id:a.id,name:a.name,genres:a.genres||[],followers:a.followers?.total||0,pop:a.popularity,url:a.external_urls?.spotify||""}))};
+      if(!t.dur && tr.duration_ms){ t.dur=tr.duration_ms; } upd();
+      if(a0.id){ try{ const tt=await api(`/artists/${a0.id}/top-tracks?market=from_token`); e.sp.top=(tt.tracks||[]).slice(0,5).map(slimTrack).filter(Boolean); }catch{} upd(); }
+      try{ const q=`track:"${cleanTitle(t.name).replace(/"/g,"")}" artist:"${(a0.name||"").replace(/"/g,"")}"`;
+        const sr=await api("/search?type=track&limit=20&market=from_token&q="+encodeURIComponent(q));
+        const seen=new Set([id]), base=normLoose(t.name);
+        e.sp.versions=(sr.tracks?.items||[]).map(slimTrack).filter(x=>x && !seen.has(x.id) && (seen.add(x.id),true) && normLoose(x.name).includes(base) && x.artists.some(a=>a.id===a0.id)).slice(0,8)
+          .map(x=>({...x,same:!!(x.isrc&&x.isrc===(e.sp.isrc||t.isrc))})); }catch{}
+      upd();
+    }catch(err){ e.sp={err:err.message}; upd(); }
+  })());
+  // Deezer: BPM・ゲイン・ランク・アルバム情報
+  jobs.push((async()=>{
+    try{ let d=null;
+      if(t.isrc){ d=await jsonp("https://api.deezer.com/track/isrc:"+encodeURIComponent(t.isrc)); if(d&&d.error) d=null; }
+      if(!d){ const q=`artist:"${(a0.name||"").replace(/"/g,"")}" track:"${t.name.replace(/"/g,"")}"`; const sr=await jsonp("https://api.deezer.com/search?limit=1&q="+encodeURIComponent(q));
+        const hit=sr&&sr.data&&sr.data[0]; if(hit){ await sleep(120); d=await jsonp("https://api.deezer.com/track/"+hit.id); if(d&&d.error) d=null; } }
+      if(!d){ e.dz={none:true}; if(!(id in S.dz)){ S.dz[id]=0; DB.set("dz",S.dz); } upd(); return; }
+      const b=d.bpm>0?Math.round(d.bpm*10)/10:0; S.dz[id]=b; DB.set("dz",S.dz);
+      if(b && !S.meta[id]?.bpm){ S.meta[id]={...(S.meta[id]||{}),bpm:b,src:"deezer"}; DB.set("meta",S.meta); if(S.now===id){ renderDeck(); renderCands(true); } }
+      e.dz={bpm:b,gain:d.gain,rank:d.rank,release:d.release_date,explicit:d.explicit_lyrics,link:d.link,title:d.title}; upd();
+      if(d.album?.id){ await sleep(120); const al=await jsonp("https://api.deezer.com/album/"+d.album.id); if(al&&!al.error) e.dz.album={title:al.title,label:al.label,genres:(al.genres?.data||[]).map(g=>g.name),release:al.release_date,nb:al.nb_tracks,fans:al.fans,type:al.record_type}; }
+      upd();
+    }catch{ e.dz={err:1}; upd(); }
+  })());
+  // MusicBrainz: タグ・初リリース・収録リリース
+  jobs.push((async()=>{
+    try{ let r=null; const mbf=async u=>{ const x=await fetch(u,{headers:{Accept:"application/json"}}); return x.ok?x.json():null; };
+      if(t.isrc){ const j=await mbf(`https://musicbrainz.org/ws/2/isrc/${encodeURIComponent(t.isrc)}?fmt=json&inc=releases+tags+genres+artist-credits`); r=j?.recordings?.[0]||null; }
+      if(!r){ const q=`recording:"${cleanTitle(t.name).replace(/"/g,"")}" AND artist:"${(a0.name||"").replace(/"/g,"")}"`; const j=await mbf(`https://musicbrainz.org/ws/2/recording?fmt=json&limit=3&query=${encodeURIComponent(q)}`);
+        r=(j?.recordings||[]).find(x=>x.score>=85)||null;
+        if(r){ await sleep(1100); const full=await mbf(`https://musicbrainz.org/ws/2/recording/${r.id}?fmt=json&inc=releases+tags+genres+artist-credits`); if(full) r={...r,...full}; } }
+      if(!r){ e.mb={none:true}; upd(); return; }
+      const tags=[...(r.genres||[]),...(r.tags||[])].sort((a,b)=>(b.count||0)-(a.count||0)).map(x=>x.name);
+      const rels=r.releases||[];
+      e.mb={id:r.id,tags:[...new Set(tags)].slice(0,8),first:r["first-release-date"]||"",nRel:rels.length,relTitles:[...new Set(rels.map(x=>x.title))].slice(0,5),length:r.length||0,
+        credit:(r["artist-credit"]||[]).map(c=>(c.name||c.artist?.name||"")+(c.joinphrase||"")).join("")}; upd();
+    }catch{ e.mb={err:1}; upd(); }
+  })());
+  // Wikipedia: アーティスト概要
+  jobs.push((async()=>{
+    const name=a0.name; if(!name){ e.wk=null; upd(); return; }
+    const KW=/音楽|ミュージシャン|バンド|歌手|プロデューサー|DJ|作曲|ラッパー|ユニット|レーベル|アルバム|シングル|musician|band|singer|producer|rapper|music|composer|duo|group|songwriter|record|album|vocalist|guitarist|drummer|pianist/i;
+    const tries=[["ja",name],["en",name],["en",name+" (musician)"],["en",name+" (band)"],["en",name+" (DJ)"],["ja",name+" (ミュージシャン)"]];
+    for(const [lang,title] of tries){ try{ const r=await fetch(`https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g,"_"))}`); if(!r.ok) continue; const j=await r.json();
+        if(j.type!=="standard"||!KW.test((j.extract||"")+(j.description||""))) continue;
+        e.wk={lang,title:j.title,extract:(j.extract||"").slice(0,320),url:j.content_urls?.desktop?.page||"",desc:j.description||""}; upd(); return; }catch{} }
+    e.wk=null; upd();
+  })());
+  // Discogs（既存の検索に加えてリリース詳細）
+  jobs.push((async()=>{ try{ await discogsInfo(id); upd(); await discogsRelease(id); upd(); }catch{} })());
+  await Promise.allSettled(jobs);
+  e.done=true; e.running=false; e.at=Date.now(); saveEx(); upd();
+}
+async function discogsRelease(id){
+  const d=S.dg[id]; if(!d||!d.rid||d.rel!==undefined) return;
+  try{ const r=await fetch("https://api.discogs.com/releases/"+d.rid,{headers:{Accept:"application/json"}}); if(r.status===429){ return; } if(!r.ok){ d.rel=null; return; }
+    const j=await r.json();
+    d.rel={released:j.released||"",formats:(j.formats||[]).map(f=>[f.name,...(f.descriptions||[])].join(" ")).slice(0,2),notes:(j.notes||"").replace(/\[.*?\]/g,"").slice(0,200),
+      tracks:(j.tracklist||[]).filter(x=>x.type_==="track"||!x.type_).slice(0,14).map(x=>({p:x.position,t:x.title,d:x.duration})),
+      credits:(j.extraartists||[]).slice(0,6).map(x=>`${x.role}: ${x.name}`),community:{have:j.community?.have||0,want:j.community?.want||0,rating:j.community?.rating?.average||0}};
+    DB.set("dg",S.dg);
+  }catch{ d.rel=null; }
+}
 const CAM_NEIGH = k => { const m=k&&k.match(/^(\d+)([AB])$/); if(!m) return []; const n=+m[1],l=m[2]; const w=x=>((x-1+12)%12)+1;
   return [k, n+(l==="A"?"B":"A"), w(n-1)+l, w(n+1)+l]; };
 function renderInfo(){
   const id=S.now, t=S.tracks[id], box=$("#infoBody"); if(!t){ box.innerHTML="—"; return; }
   const m=S.meta[id]||{}; const li=(pre,html)=>`<div class="ln"><span class="pre">${pre}</span><span>${html}</span></div>`;
   const tl=x=>`<span class="t" data-n="${x}">${esc(S.tracks[x]?.name||"")}</span> <span class="muted">${esc(arts(S.tracks[x]||{artists:[]}))}</span>`;
+  const ex=S.ex[id]||{}; const auto=LS.get("autoInfo",true);
+  const sec=(title,obj,url,fn)=>{ let body;
+    if(obj===undefined) body=auto?`<div class="muted">取得中…</div>`:""; else if(obj===null||obj.none) body=`<div class="muted">見つかりませんでした</div>`; else if(obj.err) body=`<div class="muted">取得できず${typeof obj.err==="string"?"（"+esc(obj.err)+"）":""}</div>`; else body=fn(obj);
+    if(!body) return ""; return `<h3 class="src"><span>${title}</span>${url?`<a href="${esc(url)}" target="_blank" rel="noopener">開く ↗</a>`:""}</h3>`+body; };
+  const pb=(v,max=100)=>`<span class="pb"><i style="width:${Math.max(0,Math.min(100,v/max*100))}%"></i></span>`;
+  const chips=a=>a.length?`<div class="chips">${a.map(x=>`<span class="chip">${esc(x)}</span>`).join("")}</div>`:"";
   let h="";
   // 基本
-  h+=`<h3>基本</h3>`+li("ALB",esc(t.album)+(t.year?` <span class="muted">(${t.year})</span>`:""));
+  const sp=ex.sp&&!ex.sp.err?ex.sp:null;
+  h+=`<h3>基本</h3>`+li("ALB",esc(t.album)+(sp?.albumType&&sp.albumType!=="album"?` <span class="muted">${esc(sp.albumType)}</span>`:"")+(sp?.release||t.year?` <span class="muted">(${esc(sp?.release||t.year)})</span>`:""));
+  if(sp?.label) h+=li("LBL",esc(sp.label)+(sp.copy?` <span class="muted">${esc(sp.copy.slice(0,60))}</span>`:""));
+  const dur=sp?.dur||t.dur; if(dur||sp) h+=li("LEN",`${fmtDur(dur)}${sp?.trackNo?` <span class="muted">${sp.disc>1?"Disc"+sp.disc+" ":""}Tr.${sp.trackNo}${sp.total?"/"+sp.total:""}</span>`:""}${sp?.explicit?` <span class="chip r">Explicit</span>`:""}`);
+  if(sp) h+=li("POP",`${pb(sp.pop)}<span class="muted">${sp.pop}/100 Spotify人気度</span>`);
   if(m.key){ h+=li("KEY",`${esc(m.key)} <span class="muted">相性: ${CAM_NEIGH(m.key).slice(1).join(" / ")}</span>`); }
-  if(m.bpm){ h+=li("BPM",`${m.bpm.toFixed(1)} <span class="muted">半分 ${(m.bpm/2).toFixed(1)} / 倍 ${(m.bpm*2).toFixed(1)}</span>`); }
+  if(m.bpm){ h+=li("BPM",`${m.bpm.toFixed(1)} <span class="muted">半分 ${(m.bpm/2).toFixed(1)} / 倍 ${(m.bpm*2).toFixed(1)}${m.src?" · "+({deezer:"Deezer",rekordbox:"rekordbox",manual:"手入力"}[m.src]||m.src):""}</span>`); }
+  if(sp?.isrc||t.isrc) h+=li("ISRC",`<span class="muted" style="font-family:var(--mono)">${esc(sp?.isrc||t.isrc)}</span>`);
+  // アーティスト（Spotify + Wikipedia）
+  h+=sec("アーティスト", ex.sp===undefined&&ex.wk===undefined?undefined:(sp||ex.wk||ex.sp)?{}:null, sp?.artists?.[0]?.url, ()=>{
+    let s="";
+    for(const a of (sp?.artists||[])){ s+=li("",`<b>${esc(a.name)}</b> <span class="muted">フォロワー ${fmtN(a.followers)} · 人気度 ${a.pop}</span>`+chips(a.genres.slice(0,6))); }
+    if(ex.wk){ s+=`<div class="ex">${esc(ex.wk.extract)}${ex.wk.url?` <a href="${esc(ex.wk.url)}" target="_blank" rel="noopener" style="color:var(--dim)">Wikipedia(${ex.wk.lang}) ↗</a>`:""}</div>`; }
+    else if(ex.wk===undefined && auto) s+=`<div class="muted">Wikipedia 取得中…</div>`;
+    if(sp?.top?.length){ s+=`<div class="muted" style="margin-top:4px">トップ曲</div>`+sp.top.map((x,i)=>`<div class="vl" data-v="${id}:top:${i}"><span class="pre">${i+1}</span><span>${esc(x.name)}</span><span class="d">${esc(x.album)}</span></div>`).join(""); }
+    return s; });
+  // 別バージョン
+  if(sp?.versions?.length) h+=`<h3>別バージョン・リミックス（Spotify）</h3>`+sp.versions.map((x,i)=>`<div class="vl" data-v="${id}:versions:${i}"><span>${esc(x.name)}${x.same?' <span class="chip">同一音源</span>':""}</span><span class="d">${esc(x.album.slice(0,24))} ${fmtDur(x.dur)}</span></div>`).join("");
+  else if(sp && sp.versions) h+=`<h3>別バージョン・リミックス（Spotify）</h3><div class="muted">見つかりませんでした</div>`;
+  // Deezer
+  h+=sec("Deezer", ex.dz, ex.dz?.link, d=>{ let s="";
+    s+=li("",`${d.bpm?`BPM ${d.bpm}`:`BPM 不明`}${d.gain!=null?` <span class="muted">· ゲイン ${(+d.gain).toFixed(1)} dB</span>`:""}${d.rank?` <span class="muted">· ランク ${fmtN(d.rank)}</span>`:""}${d.release?` <span class="muted">· ${esc(d.release)}</span>`:""}`);
+    if(d.album){ s+=li("ALB",`${esc(d.album.title)} <span class="muted">${esc(d.album.type||"")} ${d.album.nb?d.album.nb+"曲":""} ${d.album.fans?"· ファン "+fmtN(d.album.fans):""}</span>`); if(d.album.label) s+=li("LBL",esc(d.album.label)); s+=chips(d.album.genres||[]); }
+    return s; });
+  // MusicBrainz
+  h+=sec("MusicBrainz", ex.mb, ex.mb?.id?"https://musicbrainz.org/recording/"+ex.mb.id:"", b=>{ let s="";
+    if(b.first) s+=li("1ST",`${esc(b.first)} <span class="muted">初リリース</span>`);
+    if(b.nRel) s+=li("REL",`${b.nRel}リリースに収録 <span class="muted">${esc(b.relTitles.join(" / "))}</span>`);
+    s+=chips(b.tags); return s; });
   // Discogs
   const d=S.dg[id];
-  if(d===undefined){ h+=`<h3>Discogs</h3><div class="muted">取得中…</div>`; discogsInfo(id).then(()=>{ if(S.now===id) renderInfo(); }); }
-  else if(d===null){ h+=`<h3>Discogs</h3><div class="muted">見つかりませんでした</div>`; }
-  else { h+=`<h3>Discogs</h3>`; if(d.style.length||d.genre.length) h+=li("STY",esc([...d.style,...d.genre.filter(g=>!d.style.length)].join(" / ")));
-    if(d.label.length) h+=li("LBL",esc(d.label.join(", "))+(d.year?` <span class="muted">${d.year}${d.country?" "+esc(d.country):""}</span>`:""));
-    if(d.url) h+=li("",`<a href="${esc(d.url)}" target="_blank" rel="noopener" style="color:var(--dim)">Discogsで開く ↗</a>`); }
+  if(d===undefined && !auto){ discogsInfo(id).then(()=>{ if(S.now===id) renderInfo(); }); }
+  h+=sec("Discogs", d, d?.url, d=>{ let s="";
+    if(d.style.length||d.genre.length) s+=li("STY",esc([...d.style,...d.genre.filter(g=>!d.style.length)].join(" / ")));
+    if(d.label.length) s+=li("LBL",esc(d.label.join(", "))+(d.year?` <span class="muted">${d.year}${d.country?" "+esc(d.country):""}</span>`:""));
+    if(d.format?.length) s+=li("FMT",esc((d.rel?.formats?.length?d.rel.formats:d.format).join(" / "))+(d.rel?.released?` <span class="muted">${esc(d.rel.released)}</span>`:""));
+    if(d.rel){ if(d.rel.community?.have) s+=li("",`<span class="muted">所有 ${fmtN(d.rel.community.have)} · 欲しい ${fmtN(d.rel.community.want)}${d.rel.community.rating?" · 評価 "+d.rel.community.rating.toFixed(2):""}</span>`);
+      if(d.rel.credits?.length) s+=li("CRD",`<span class="muted">${esc(d.rel.credits.join(" / "))}</span>`);
+      if(d.rel.tracks?.length>1){ const me=normLoose(t.name); s+=`<div class="muted" style="margin-top:4px">同じリリースの収録曲</div>`+d.rel.tracks.map(x=>`<div class="ln"><span class="pre">${esc(x.p)}</span><span${normLoose(x.t)===me?' style="color:var(--accent)"':""}>${esc(x.t)}</span>${x.d?`<span class="muted" style="margin-left:auto;font-family:var(--mono)">${esc(x.d)}</span>`:""}</div>`).join(""); }
+      if(d.rel.notes) s+=`<div class="ex muted">${esc(d.rel.notes)}</div>`; }
+    else if(d.rid && d.rel===undefined && auto) s+=`<div class="muted">リリース詳細 取得中…</div>`;
+    return s; });
+  // ライブラリ統計
+  { const all=Object.values(S.tracks); const lib=new Set([...Object.keys(S.occ),...S.saved]); const cands=[...lib].filter(x=>x!==id&&S.tracks[x]);
+    const bpmOk=m.bpm?cands.filter(x=>{ const b=bpmOf(x); if(!b) return false; const r=[b/m.bpm,b/m.bpm*2,b/m.bpm/2].reduce((p,q)=>Math.abs(q-1)<Math.abs(p-1)?q:p); return Math.abs(r-1)<=.06; }).length:null;
+    const keyOk=m.key?cands.filter(x=>{ const k=keyCompat(m.key,keyOf(x)); return k&&k.s>=.85; }).length:null;
+    const lbl=(sp?.label||d?.label?.[0]||"").toLowerCase(); const sameLbl=lbl?all.filter(x=>x.id!==id&&((S.ex[x.id]?.sp?.label||S.dg[x.id]?.label?.[0]||"").toLowerCase()===lbl)).length:0;
+    const yr=t.year; const sameYr=yr?cands.filter(x=>S.tracks[x].year===yr).length:0;
+    const played=S.hist.filter(x=>x===id).length;
+    let s=li("",`<span class="muted">読み込んだプレイリスト ${ (S.occ[id]||[]).length }本に収録${S.saved.includes(id)?" · お気に入り済":""}${played?` · このセットで ${played}回目`:""}</span>`);
+    const parts=[]; if(bpmOk!=null) parts.push(`BPM±6%内 ${bpmOk}曲`); if(keyOk!=null) parts.push(`キー相性◎ ${keyOk}曲`); if(sameYr) parts.push(`同じ${yr}年 ${sameYr}曲`); if(sameLbl) parts.push(`同レーベル ${sameLbl}曲`);
+    if(parts.length) s+=li("",`<span class="muted">ライブラリ内：${parts.join(" · ")}</span>`);
+    h+=`<h3>ライブラリ統計</h3>`+s; }
   // プレイリスト内の前後
   const occ=S.occ[id]||[];
   if(occ.length){ h+=`<h3>プレイリストでの前後（${occ.length}本）</h3>`;
@@ -701,8 +881,9 @@ $("#djMode").onchange=e=>setDj(e.target.checked);
 // ---------- UI配線 ----------
 function openLib(){ $("#redir").textContent=REDIRECT; $("#cid").value=LS.get("cid",""); $("#ghTok").value=LS.get("ghTok","")?"••••••••":""; $("#ghTok").placeholder=LS.get("ghTok","")?"保存済み（変えるときだけ入力）":"github_pat_…"; $("#incSaved").checked=LS.get("incSaved",false); renderPlList(); $("#dlgLib").showModal(); }
 document.addEventListener("click",e=>{
-  const b=e.target.closest("[data-q],[data-p],[data-n],[data-c]"); if(!b) return;
-  if(b.dataset.c){ copyTrack(b.dataset.c,b); }
+  const b=e.target.closest("[data-q],[data-p],[data-n],[data-c],[data-v]"); if(!b) return;
+  if(b.dataset.v){ const [src,kind,i]=b.dataset.v.split(":"); const x=S.ex[src]?.sp?.[kind]?.[+i]; if(x){ if(!S.tracks[x.id]) S.tracks[x.id]=x; setNow(x.id); } }
+  else if(b.dataset.c){ copyTrack(b.dataset.c,b); }
   else if(b.dataset.q) queue(b.dataset.q); else if(b.dataset.p) play(b.dataset.p); else if(b.dataset.n){ setNow(b.dataset.n); $("#sres").innerHTML=""; $("#q").value=""; }
 });
 $("#btnLib").onclick=openLib; $("#closeLib").onclick=()=>{ saveSel(); $("#dlgLib").close(); };
@@ -732,20 +913,24 @@ $("#btnClearHist").onclick=()=>{ S.hist=[]; LS.set("hist",[]); refresh(); };
   el.oninput=()=>{ sp.textContent=el.value; LS.set(id,el.value); renderCands(); }; });
 ["fBpm","fKey","fArtist","fHalf"].forEach(id=>$("#"+id).onchange=renderCands);
 $("#copyMode").value=LS.get("copyMode","title"); $("#copyMode").onchange=e=>LS.set("copyMode",e.target.value);
+$("#autoInfo").checked=LS.get("autoInfo",true); $("#autoInfo").onchange=e=>{ LS.set("autoInfo",e.target.checked); if(e.target.checked&&S.now) gatherInfo(S.now); renderInfo(); };
 
 // ---------- 起動 ----------
 (async()=>{
   await DB.open();
   S.tracks=await DB.get("tracks")||{}; S.playlists=await DB.get("playlists")||[]; S.saved=await DB.get("saved")||[];
-  S.meta=await DB.get("meta")||{}; S.dz=await DB.get("dz")||{}; S.dg=await DB.get("dg")||{}; S.plIndex=await DB.get("plIndex")||[];
+  S.meta=await DB.get("meta")||{}; S.dz=await DB.get("dz")||{}; S.dg=await DB.get("dg")||{}; S.ex=await DB.get("ex")||{}; S.plIndex=await DB.get("plIndex")||[];
+  for(const v of Object.values(S.ex)) v.running=false;
   S.hist=LS.get("hist",[]); S.now=LS.get("now",null);
   buildIndex();
+  if(matchMedia("(max-width:760px)").matches){ $("#dWeights").open=false; $("#dHist").open=false; $("#info").open=false; }
   try{ await handleRedirect(); }catch(e){ toast("認証失敗："+e.message); }
   setDj(LS.get("dj",false));
   if(await token()){ $("#btnLogin").textContent="接続済み"; try{ S.me=await api("/me"); setStatus(`${S.me.display_name||S.me.id} / 曲 ${Object.keys(S.tracks).length} / PL ${S.playlists.length}`);}catch(e){ setStatus(e.message); }
     if(LS.get("follow",false) && !LS.get("dj",false)){ $("#follow").checked=true; setFollow(true); } }
   if(!S.playlists.length && !LS.get("cid","")) openLib();
   refresh();
+  if(S.now && LS.get("autoInfo",true)) gatherInfo(S.now);
   if(LS.get("autoSync",true) && LS.get("ghTok","")) syncPull(true);
 })();
 </script>
