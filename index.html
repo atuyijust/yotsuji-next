@@ -33,8 +33,12 @@
   .modes button.on{background:var(--accent);color:#08110e;font-weight:600}
   input,select{background:#0f1112;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font:inherit}
   input[type=range]{padding:0}
-  main{display:grid;grid-template-columns:340px 1fr;gap:0;height:calc(100vh - 47px)}
-  aside{border-right:1px solid var(--line);overflow:auto;padding:14px}
+  main{display:grid;grid-template-columns:var(--side,340px) 7px 1fr;gap:0;height:calc(100vh - 47px)}
+  aside{overflow:auto;padding:14px}
+  #split{cursor:col-resize;position:relative;touch-action:none;outline:none}
+  #split::before{content:"";position:absolute;top:0;bottom:0;left:3px;width:1px;background:var(--line);transition:background .15s,width .15s,left .15s}
+  #split:hover::before,#split:focus-visible::before,body.resizing #split::before{background:var(--accent);width:3px;left:2px}
+  body.resizing{cursor:col-resize;user-select:none}
   section.list{overflow:auto;padding:14px 18px}
   h2{font:600 11px var(--mono);letter-spacing:.15em;color:var(--dim);margin:18px 0 8px;text-transform:uppercase}
   h2:first-child{margin-top:0}
@@ -119,6 +123,7 @@
     header .sp{display:none}
     #status{width:100%;order:9}
     main{display:block;height:auto}
+    #split{display:none}
     aside{border-right:0;border-bottom:1px solid var(--line);padding:12px}
     section.list{padding:0 12px 10px}
     input,select{font-size:16px}
@@ -177,6 +182,7 @@
     <div style="margin-top:8px;display:flex;gap:6px"><button class="sm" id="btnExport">プレイリスト化</button><button class="sm" id="btnClearHist">履歴をクリア</button></div>
     </details>
   </aside>
+  <div id="split" role="separator" aria-orientation="vertical" tabindex="0" title="ドラッグで幅を変更（ダブルクリックで元に戻す）"></div>
 
   <section class="list">
     <div id="mobileNow"><b>NOW</b><span class="muted">未選択</span></div>
@@ -1126,6 +1132,19 @@ function setMode(k){ LS.set("mode",k); renderModes(); renderCands(); setStatus("
 $("#modes").onclick=e=>{ const b=e.target.closest("[data-mode]"); if(b) setMode(b.dataset.mode); };
 $("#reroll").onclick=()=>{ S.seed=(S.seed||0)+1; renderCands(); };
 renderModes();
+// 左右の仕切り：ドラッグ／←→キーで幅を変え、LS sideW に保存。ダブルクリックで既定に戻す
+const SIDE_DEF=340, sideClamp=w=>Math.round(Math.max(240,Math.min(w,innerWidth-380,900)));
+function setSide(w,save){ const v=sideClamp(w); document.documentElement.style.setProperty("--side",v+"px"); if(save) LS.set("sideW",v); return v; }
+setSide(LS.get("sideW",SIDE_DEF));
+(()=>{ const sp=$("#split"); let x0=0,w0=0;
+  sp.addEventListener("pointerdown",e=>{ if(e.button!==0) return; e.preventDefault(); sp.setPointerCapture(e.pointerId); x0=e.clientX; w0=$("aside").getBoundingClientRect().width; document.body.classList.add("resizing"); });
+  sp.addEventListener("pointermove",e=>{ if(sp.hasPointerCapture(e.pointerId)) setSide(w0+e.clientX-x0); });
+  const end=e=>{ if(!sp.hasPointerCapture(e.pointerId)) return; sp.releasePointerCapture(e.pointerId); document.body.classList.remove("resizing"); setSide(w0+e.clientX-x0,true); };
+  sp.addEventListener("pointerup",end); sp.addEventListener("pointercancel",end);
+  sp.addEventListener("dblclick",()=>setSide(SIDE_DEF,true));
+  sp.addEventListener("keydown",e=>{ if(e.key!=="ArrowLeft"&&e.key!=="ArrowRight") return; e.preventDefault(); e.stopPropagation(); setSide($("aside").getBoundingClientRect().width+(e.key==="ArrowRight"?20:-20),true); });
+  addEventListener("resize",()=>setSide(LS.get("sideW",SIDE_DEF)));
+})();
 $("#copyMode").value=LS.get("copyMode","title"); $("#copyMode").onchange=e=>LS.set("copyMode",e.target.value);
 $("#autoInfo").checked=LS.get("autoInfo",true); $("#autoInfo").onchange=e=>{ LS.set("autoInfo",e.target.checked); if(e.target.checked&&S.now) gatherInfo(S.now); renderInfo(); };
 
