@@ -26,6 +26,7 @@
   button:hover{border-color:var(--accent)}
   button.pri{background:var(--accent);color:#08110e;border-color:var(--accent);font-weight:600}
   button.sm{padding:2px 7px;font-size:11px}
+  #updBtn{border-color:var(--accent);color:var(--accent)}
   input,select{background:#0f1112;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font:inherit}
   input[type=range]{padding:0}
   main{display:grid;grid-template-columns:340px 1fr;gap:0;height:calc(100vh - 47px)}
@@ -138,6 +139,7 @@
   <h1>四辻 <span>NEXT</span></h1>
   <span id="djBadge">DJ MODE</span>
   <span id="status">未接続</span>
+  <button class="sm" id="updBtn" hidden title="新しい版が公開されています">新しい版に更新</button>
   <span class="sp"></span>
   <label class="ck" title="rekordboxで再生中は「再生」「キュー」を隠し、追従を止めます"><input type="checkbox" id="djMode"> DJモード</label>
   <button id="btnLib">ライブラリ</button>
@@ -205,6 +207,8 @@
       <button class="sm" id="plNone">全解除</button>
     </div>
     <label class="ck" style="margin-bottom:6px"><input type="checkbox" id="incSaved"> 「お気に入りの曲」も候補に含める</label>
+    <label class="ck" style="margin-bottom:6px" title="起動時・画面に戻ったとき（30分おき）に、変わったプレイリストだけ読み直します"><input type="checkbox" id="autoLib" checked> プレイリストの変更を自動で取り込む</label>
+    <label class="ck" style="margin-bottom:6px" title="新しい版が公開されたら、操作していないときに自動で読み直します"><input type="checkbox" id="autoUpd" checked> 新しい版が出たら自動で更新</label>
     <div id="plList" style="max-height:260px;overflow:auto"></div>
     <div class="bar"><i id="prog"></i></div>
     <div class="muted" id="scanMsg"></div>
@@ -292,7 +296,7 @@ async function tokenRequest(body){
   const r = await fetch("https://accounts.spotify.com/api/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams(body)});
   const j = await r.json(); if(!r.ok) throw new Error(j.error_description||j.error||"token error");
   const tok = {access:j.access_token, refresh:j.refresh_token||LS.get("tok",{}).refresh, exp:Date.now()+(j.expires_in-60)*1000};
-  LS.set("tok",tok); return tok;
+  LS.set("tok",tok); LS.set("hadLogin",true); sessionStorage.removeItem("autoLogin"); return tok;
 }
 async function handleRedirect(){
   const p = new URLSearchParams(location.search);
@@ -352,8 +356,9 @@ function renderPlList(){
 function saveSel(){ const sel = new Set(LS.get("plSel",[]));
   $$("#plList input[type=checkbox]").forEach(c=>{ c.checked?sel.add(c.dataset.id):sel.delete(c.dataset.id); }); LS.set("plSel",[...sel]); }
 
-async function scan(){
-  saveSel();
+async function scan(opt={}){
+  if(S.scanning) return; S.scanning=true;
+  if(!opt.auto) saveSel();
   const sel = new Set(LS.get("plSel",[]));
   const targets = S.plIndex.filter(p=>sel.has(p.id)&&p.own);
   const keep = new Map(S.playlists.map(p=>[p.id,p]));
@@ -373,17 +378,66 @@ async function scan(){
       $("#scanMsg").textContent=`${done}/${targets.length} ${p.name}`;
     }
     S.playlists = next;
-    if($("#incSaved").checked){
-      const ids=[]; let url="/me/tracks?limit=50";
-      while(url){ const j=await api(url); for(const it of j.items||[]){ const t=slimTrack(it.track||it.item); if(t){S.tracks[t.id]=t; ids.push(t.id);} } url=j.next; $("#scanMsg").textContent=`お気に入り ${ids.length}曲…`; await sleep(80); }
+    if($("#incSaved").checked && (!opt.auto || opt.saved)){
+      const ids=[]; let url="/me/tracks?limit=50", first=true;
+      while(url){ const j=await api(url); if(first){ first=false; LS.set("savedSig",savedSig(j)); } for(const it of j.items||[]){ const t=slimTrack(it.track||it.item); if(t){S.tracks[t.id]=t; ids.push(t.id);} } url=j.next; $("#scanMsg").textContent=`お気に入り ${ids.length}曲…`; await sleep(80); }
       S.saved=ids;
     }
-    LS.set("incSaved",$("#incSaved").checked);
+    LS.set("incSaved",$("#incSaved").checked); LS.set("libAt",Date.now());
     await persist(); buildIndex(); renderPlList();
     $("#scanMsg").textContent=`完了：プレイリスト ${S.playlists.length}本 / 曲 ${Object.keys(S.tracks).length}`;
     refresh();
     if($("#autoDz").checked) fillBpm(); else autoSync();
-  }catch(e){ $("#scanMsg").textContent="中断："+e.message; S.playlists=[...next, ...S.playlists.filter(p=>!next.find(n=>n.id===p.id))]; await persist(); buildIndex(); }
+  }catch(e){ $("#scanMsg").textContent="中断："+e.message; if(opt.auto) setStatus("自動取り込みを中断："+e.message); S.playlists=[...next, ...S.playlists.filter(p=>!next.find(n=>n.id===p.id))]; await persist(); buildIndex(); }
+  finally{ S.scanning=false; }
+}
+const savedSig=j=>(j.total||0)+":"+((j.items||[])[0]?.track?.id||"");
+
+// ---------- 自動化 ----------
+// プレイリストの変更（snapshot_id）とお気に入りの増減を見て、変わったものだけ取り込み直す
+async function autoRefreshLib(force){
+  if(!LS.get("autoLib",true) || S.scanning || $("#dlgLib").open || !LS.get("plSel",[]).length) return;
+  if(!force && Date.now()-LS.get("libAt",0) < 30*60e3) return;
+  if(!await token()) return;
+  LS.set("libAt",Date.now());
+  try{
+    const before=new Map(S.playlists.map(p=>[p.id,p.snapshot]));
+    await loadPlaylistIndex();
+    const sel=new Set(LS.get("plSel",[]));
+    const want=S.plIndex.filter(p=>sel.has(p.id)&&p.own);
+    const changed=want.filter(p=>before.get(p.id)!==p.snapshot);
+    const removed=S.playlists.some(p=>!want.find(x=>x.id===p.id));
+    let saved=false;
+    if(LS.get("incSaved",false)){ const j=await api("/me/tracks?limit=1"); saved=savedSig(j)!==LS.get("savedSig",""); }
+    if(changed.length||removed||saved){
+      setStatus(`ライブラリの変更を自動で取り込み中（プレイリスト ${changed.length}本${saved?"・お気に入り":""}）…`);
+      $("#incSaved").checked=LS.get("incSaved",false);
+      await scan({auto:true,saved});
+      setStatus(`自動で取り込みました：PL ${S.playlists.length}本 / 曲 ${Object.keys(S.tracks).length}`);
+    } else buildIndex();
+  }catch(e){ setStatus("自動取り込みエラー："+e.message); }
+}
+// 公開中の index.html とこのページのコードを比べ、新しい版が出ていたら自動で読み直す
+const strHash=s=>{ let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))|0; return h; };
+const APP_SIG=strHash((document.querySelector("head style")?.textContent||"")+(document.currentScript?.textContent||""));
+let updReady=false;
+async function checkUpdate(){
+  if(updReady || !/^https?:$/.test(location.protocol)) return updReady;
+  try{
+    const r=await fetch(location.pathname+"?_="+Date.now(),{cache:"no-store"}); if(!r.ok) return false;
+    const d=new DOMParser().parseFromString(await r.text(),"text/html");
+    const sc=[...d.querySelectorAll("script:not([src])")].pop(), st=d.querySelector("head style");
+    if(sc && st && strHash(st.textContent+sc.textContent)!==APP_SIG){ updReady=true; $("#updBtn").hidden=false; }
+  }catch{}
+  return updReady;
+}
+function busy(){ const a=document.activeElement;
+  return S.scanning || dzRunning || $("#dlgLib").open || !!(a && a.matches && a.matches("textarea,select,input:not([type=checkbox]):not([type=range])")); }
+function maybeReload(){ if(updReady && LS.get("autoUpd",true) && !busy()) location.reload(); }
+// Spotifyの接続が切れていたら、1タブにつき1回だけ自動で再接続する（同意済みなら画面操作なしで戻ってくる）
+function tryAutoLogin(){
+  if(!LS.get("cid","") || !LS.get("hadLogin",false) || sessionStorage.getItem("autoLogin")) return false;
+  sessionStorage.setItem("autoLogin","1"); setStatus("Spotifyに再接続中…"); login(); return true;
 }
 async function persist(){ await DB.set("tracks",S.tracks); await DB.set("playlists",S.playlists); await DB.set("saved",S.saved); await DB.set("meta",S.meta); }
 function buildIndex(){
@@ -939,6 +993,10 @@ $("#plList").addEventListener("change",saveSel);
 $("#scan").onclick=()=>scan();
 $("#xml").onchange=e=>e.target.files[0]&&importXml(e.target.files[0]).catch(err=>$("#xmlMsg").textContent="読み込み失敗："+err.message);
 $("#runDz").onclick=()=>fillBpm();
+$("#autoLib").checked=LS.get("autoLib",true); $("#autoLib").onchange=e=>LS.set("autoLib",e.target.checked);
+$("#autoUpd").checked=LS.get("autoUpd",true); $("#autoUpd").onchange=e=>LS.set("autoUpd",e.target.checked);
+$("#updBtn").onclick=()=>location.reload();
+$("#incSaved").checked=LS.get("incSaved",false);
 $("#autoDz").checked=LS.get("autoDz",true); $("#autoDz").onchange=e=>LS.set("autoDz",e.target.checked);
 $("#metaOut").onclick=()=>{ const man=Object.fromEntries(Object.entries(S.meta).filter(([,v])=>v.src==="manual"));
   const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([JSON.stringify(man)],{type:"application/json"})); a.download="yotsuji-next-meta.json"; a.click(); };
@@ -966,14 +1024,25 @@ $("#autoInfo").checked=LS.get("autoInfo",true); $("#autoInfo").onchange=e=>{ LS.
   S.hist=LS.get("hist",[]); S.now=LS.get("now",null);
   buildIndex();
   if(matchMedia("(max-width:760px)").matches){ $("#dWeights").open=false; $("#dHist").open=false; $("#info").open=false; }
+  const authErr=new URLSearchParams(location.search).has("error");
   try{ await handleRedirect(); }catch(e){ toast("認証失敗："+e.message); }
   setDj(LS.get("dj",false));
-  if(await token()){ $("#btnLogin").textContent="接続済み"; try{ S.me=await api("/me"); setStatus(`${S.me.display_name||S.me.id} / 曲 ${Object.keys(S.tracks).length} / PL ${S.playlists.length}`);}catch(e){ setStatus(e.message); }
-    if(LS.get("follow",false) && !LS.get("dj",false)){ $("#follow").checked=true; setFollow(true); } }
+  const authed=!!await token();
+  if(!authed && !authErr && tryAutoLogin()) return;
+  if(authed){ LS.set("hadLogin",true); $("#btnLogin").textContent="接続済み"; try{ S.me=await api("/me"); setStatus(`${S.me.display_name||S.me.id} / 曲 ${Object.keys(S.tracks).length} / PL ${S.playlists.length}`);}catch(e){ setStatus(e.message); }
+    if(LS.get("follow",true) && !LS.get("dj",false)){ $("#follow").checked=true; setFollow(true); } }
   if(!S.playlists.length && !LS.get("cid","")) openLib();
   refresh();
   if(S.now && LS.get("autoInfo",true)) gatherInfo(S.now);
-  if(LS.get("autoSync",true) && LS.get("ghTok","")) syncPull(true);
+  if(LS.get("autoSync",true) && LS.get("ghTok","")) await syncPull(true);
+  if(authed) autoRefreshLib(true);
+  setTimeout(checkUpdate,20e3);
+  setInterval(async()=>{ if(document.visibilityState!=="visible") return; await checkUpdate(); autoRefreshLib(); },10*60e3);
+  document.addEventListener("visibilitychange",async()=>{
+    if(document.visibilityState==="hidden"){ maybeReload(); return; }
+    if(await checkUpdate() && !LS.get("dj",false)){ maybeReload(); if(updReady&&!busy()) return; }
+    if(!await token()){ if(tryAutoLogin()) return; } else autoRefreshLib();
+  });
 })();
 </script>
 </body>

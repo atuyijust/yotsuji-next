@@ -43,6 +43,13 @@ Spotify（人気度・レーベル・リリース・アーティストのジャ�
 - IndexedDB "yotsuji-next" store "kv"（`DB.get/set`）: tracks, meta, dz, dg, ex, plIndex。localStorage（`LS`）: cid, tok, now, hist, weights, 各設定
 - GitHub Gist 同期（`syncPush/syncPull/mergeMeta`）: ファイル `yotsuji-next-sync.json`、トークンは LS `ghTok`（UIで入力、コードに書かない）。meta は SRC_RANK の高い方を採用してマージ
 
+## 自動化（「極力自動で」の方針）
+- `autoRefreshLib(force)`: 起動時・画面復帰時・表示中10分おき（30分スロットル、LS `libAt`）にプレイリスト一覧の snapshot_id を比べ、変わったPLだけ `scan({auto:true})`。お気に入りは `/me/tracks?limit=1` の total+先頭ID（LS `savedSig`）が変わったときだけ再取得。設定 `#autoLib`
+- `checkUpdate()`/`maybeReload()`: 公開中 index.html の `<style>`+`<script>` のハッシュを `APP_SIG` と比べ、新版なら `#updBtn` を出し、タブが隠れたとき（DJモード以外は画面復帰時も）に自動リロード。入力中・ダイアログ表示中・読み込み中はしない。設定 `#autoUpd`
+- `tryAutoLogin()`: 一度ログインした端末（LS `hadLogin`）でトークンが切れていたら、タブごとに1回だけ自動で再認証へ（sessionStorage `autoLogin` でループ防止）
+- 再生追従 `follow` は既定ON（DJモード中は止まる）
+- 自動化できないもの: rekordbox XML／Exportify CSV の取り込み（ブラウザはファイルを勝手に読めない）、rekordbox再生中の「Nowへ」
+
 ## UI
 - キーボード: ↑↓/j/k 選択、Enter→Nowへ、/ 検索、Esc、U 取り消し、C 曲名コピー（`#copyMode`）
 - DJモード（`setDj`）: 再生／キューボタンを隠し追従を止める
