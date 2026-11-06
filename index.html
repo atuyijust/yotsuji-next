@@ -27,6 +27,10 @@
   button.pri{background:var(--accent);color:#08110e;border-color:var(--accent);font-weight:600}
   button.sm{padding:2px 7px;font-size:11px}
   #updBtn{border-color:var(--accent);color:var(--accent)}
+  .modes{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+  .modes button{border:0;border-radius:0;padding:4px 9px;font-size:12px;background:transparent}
+  .modes button+button{border-left:1px solid var(--line)}
+  .modes button.on{background:var(--accent);color:#08110e;font-weight:600}
   input,select{background:#0f1112;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font:inherit}
   input[type=range]{padding:0}
   main{display:grid;grid-template-columns:340px 1fr;gap:0;height:calc(100vh - 47px)}
@@ -177,6 +181,7 @@
   <section class="list">
     <div id="mobileNow"><b>NOW</b><span class="muted">未選択</span></div>
     <div class="filters">
+      <span class="modes" id="modes"></span><button class="sm" id="reroll" title="意外性の候補を入れ替える（R）" hidden>🎲</button>
       <label class="ck">BPM幅
         <select id="fBpm"><option value="0">制限なし</option><option value="0.04">±4%</option><option value="0.06" selected>±6%</option><option value="0.1">±10%</option></select>
       </label>
@@ -187,7 +192,7 @@
         <select id="copyMode"><option value="title">曲名のみ</option><option value="both">曲名＋アーティスト</option><option value="artist">アーティストのみ</option></select>
       </label>
       <span class="muted" id="candInfo"></span>
-      <span class="keys"><b>↑↓</b> 選択 <b>Enter</b> Nowへ <b>/</b> 検索 <b>C</b> 曲名コピー <b>U</b> 取り消し</span>
+      <span class="keys"><b>↑↓</b> 選択 <b>Enter</b> Nowへ <b>/</b> 検索 <b>C</b> 曲名コピー <b>U</b> 取り消し <b>M</b> 選び方</span>
     </div>
     <div id="cands"><div class="empty">ライブラリを読み込み、Now Playingを決めると候補が並びます。</div></div>
   </section>
@@ -482,8 +487,22 @@ function bpmOf(id){ return S.meta[id]?.bpm || null; }
 function keyOf(id){ return S.meta[id]?.key || null; }
 function genOf(id){ return (S.meta[id]?.genre||"").toLowerCase().split(/[\/,;]/).map(x=>x.trim()).filter(Boolean); }
 
+// 選び方（モード）ごとの倍率。スライダーの重みに掛ける。af=雰囲気の近さ, nov=初めての組み合わせ, rnd=ゆらぎ, pop=人気の低さ, eng=エネルギーの上げ下げ
+const MODES={
+  flow:    {label:"いつもの流れ", tip:"自分のプレイリストで並べた順を重視",                      m:{flow:1,   co:1,   bpm:1,key:1,gen:1,  af:0, nov:0, rnd:0,  pop:0, eng:0}},
+  similar: {label:"似た曲",       tip:"ジャンル・エネルギー・ダンス度・明るさが近い曲",            m:{flow:.3,  co:.6,  bpm:1,key:1,gen:1.5,af:3, nov:0, rnd:0,  pop:0, eng:0}},
+  surprise:{label:"意外性",       tip:"つながる（BPM・キー）けど、まだ並べたことのない曲。🎲で入れ替え", m:{flow:-.6, co:-.3, bpm:1,key:1,gen:.3, af:.8,nov:2, rnd:1.5,pop:1, eng:0}},
+  up:      {label:"上げる",       tip:"今よりエネルギーが少し高い曲",                              m:{flow:.5,  co:.5,  bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0,  pop:0, eng:3}},
+  down:    {label:"落とす",       tip:"今よりエネルギーが少し低い曲",                              m:{flow:.5,  co:.5,  bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0,  pop:0, eng:3}},
+};
+const afOf=id=>S.meta[id]?.af||null;
+function afSim(a,b){ if(!a||!b) return null; const ks=["en","da","va"].filter(k=>a[k]!=null&&b[k]!=null); if(ks.length<2) return null;
+  const d=ks.reduce((x,k)=>x+Math.abs(a[k]-b[k]),0)/ks.length; return Math.max(-1,1-d*2.5); }  // 平均差0.1→0.75, 0.2→0.5, 0.4→0
+function rnd01(str){ let h=2166136261; for(let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619); } return ((h>>>0)%10000)/10000; }
+
 function suggest(){
   const cur = S.now; if(!cur) return [];
+  const mode=MODES[LS.get("mode","flow")]?LS.get("mode","flow"):"flow", M=MODES[mode].m;
   const played = new Set([cur, ...S.hist]);
   const flow={}, co={};
   for(const [pi,pos] of (S.occ[cur]||[])){
@@ -493,9 +512,10 @@ function suggest(){
     const wgt = 1/Math.log2(ids.length+2);
     for(const id of new Set(ids)) co[id]=(co[id]||0)+wgt;
   }
-  const curBpm=bpmOf(cur), curKey=keyOf(cur), curGen=genOf(cur), curArt=new Set(S.tracks[cur]?.artists.map(a=>a.id));
+  const curBpm=bpmOf(cur), curKey=keyOf(cur), curGen=genOf(cur), curArt=new Set(S.tracks[cur]?.artists.map(a=>a.id)), curAf=afOf(cur);
   const fB=+$("#fBpm").value, fK=$("#fKey").checked, fA=$("#fArtist").checked, half=$("#fHalf").checked;
-  const W={flow:w("wFlow"),co:w("wCo"),bpm:w("wBpm"),key:w("wKey"),gen:w("wGen")};
+  const W={flow:w("wFlow")*M.flow,co:w("wCo")*M.co,bpm:w("wBpm")*M.bpm,key:w("wKey")*M.key,gen:w("wGen")*M.gen,af:M.af,nov:M.nov,rnd:M.rnd,pop:M.pop,eng:M.eng};
+  const seed=cur+":"+(S.seed||0);
   const pool = new Set([...Object.keys(S.occ), ...S.saved]);
   const res=[];
   for(const id of pool){
@@ -503,8 +523,9 @@ function suggest(){
     const sameArt = t.artists.some(a=>curArt.has(a.id));
     if(fA && sameArt) continue;
     const chips=[]; let sc=0;
-    if(flow[id]){ const v=Math.min(1,flow[id]/2); sc+=W.flow*v; chips.push(["g", flow[id]>=1?`直後に置いた×${Math.round(flow[id])}`:"直前に置いた"]); }
+    if(flow[id]){ const v=Math.min(1,flow[id]/2); sc+=W.flow*v; chips.push([W.flow<0?"":"g", flow[id]>=1?`直後に置いた×${Math.round(flow[id])}`:"直前に置いた"]); }
     if(co[id]){ const v=1-Math.exp(-co[id]*1.2); sc+=W.co*v; const n=(S.occ[id]||[]).filter(([pi])=>S.occ[cur].some(([pj])=>pj===pi)).length; chips.push(["", `同じPL×${n}`]); }
+    if(W.nov && !flow[id]){ const v=co[id]?.3:1; sc+=W.nov*v; if(v===1) chips.push(["g","初めての組み合わせ"]); }
     const b=bpmOf(id);
     if(curBpm && b){
       let r=b/curBpm, cands=[r]; if(half) cands.push(r*2,r/2);
@@ -517,6 +538,15 @@ function suggest(){
     if(kc){ if(fK && kc.s<.5) continue; sc+=W.key*kc.s; chips.push([kc.s>=.85?"g":kc.s>=.4?"y":"r", `${keyOf(id)} ${kc.t}`]); }
     else if(fK && curKey) continue;
     const g=genOf(id); if(curGen.length && g.length && g.some(x=>curGen.includes(x))){ sc+=W.gen; chips.push(["g", g.find(x=>curGen.includes(x))]); }
+    const af=afOf(id);
+    if(W.af){ const sim=afSim(curAf,af); if(sim!=null){ sc+=W.af*sim; if(W.af>=1 && sim>=.6) chips.push(["g",`雰囲気が近い ${Math.round(sim*100)}%`]); } }
+    if(W.eng && curAf?.en!=null && af?.en!=null){
+      const d=(af.en-curAf.en)*(mode==="down"?-1:1);   // 上げる方向をプラスに
+      const v = d>=.03&&d<=.25?1 : d>.25?.4 : d>-.03?.2 : -.8;
+      sc+=W.eng*v; chips.push([v>=1?"g":v>0?"y":"r", `エネルギー ${af.en>=curAf.en?"+":"−"}${Math.abs(Math.round((af.en-curAf.en)*100))}`]);
+    }
+    if(W.pop && t.pop!=null){ sc+=W.pop*(1-t.pop/100)*.6; if(t.pop<30) chips.push(["y","隠れた曲"]); }
+    if(W.rnd) sc+=W.rnd*rnd01(seed+id);
     if(sameArt){ sc+=0.3; chips.push(["y","同アーティスト"]); }
     if(sc<=0) continue;
     res.push({id,sc,chips});
@@ -1040,6 +1070,8 @@ document.addEventListener("keydown",e=>{
   else if(e.key==="ArrowUp"||e.key==="k"){ e.preventDefault(); moveSel(-1); }
   else if(e.key==="Enter"){ const r=$$("#cands .cand")[sel]; if(r){ e.preventDefault(); setNow(r.dataset.id); } }
   else if(e.key==="u"||e.key==="U"){ e.preventDefault(); undoNow(); }
+  else if(e.key==="m"||e.key==="M"){ e.preventDefault(); const ks=Object.keys(MODES); setMode(ks[(ks.indexOf(LS.get("mode","flow"))+1)%ks.length]); }
+  else if((e.key==="r"||e.key==="R") && LS.get("mode","flow")==="surprise"){ e.preventDefault(); $("#reroll").click(); }
   else if(e.key==="c"||e.key==="C"){ const r=$$("#cands .cand")[sel]; if(r){ e.preventDefault(); copyTrack(r.dataset.id, r.querySelector("[data-c]")); } }
 });
 $("#cands").addEventListener("click",e=>{ const r=e.target.closest(".cand"); if(r&&!e.target.closest("button")){ sel=+r.dataset.i; moveSel(0); } });
@@ -1087,6 +1119,13 @@ $("#btnClearHist").onclick=()=>{ S.hist=[]; LS.set("hist",[]); refresh(); };
 ["wFlow","wCo","wBpm","wKey","wGen"].forEach(id=>{ const el=$("#"+id); const sp=el.nextElementSibling; el.value=LS.get(id,el.value); sp.textContent=el.value;
   el.oninput=()=>{ sp.textContent=el.value; LS.set(id,el.value); renderCands(); }; });
 ["fBpm","fKey","fArtist","fHalf"].forEach(id=>$("#"+id).onchange=renderCands);
+function renderModes(){ const cur=LS.get("mode","flow");
+  $("#modes").innerHTML=Object.entries(MODES).map(([k,v])=>`<button data-mode="${k}" class="${k===cur?"on":""}" title="${esc(v.tip)}">${v.label}</button>`).join("");
+  $("#reroll").hidden=cur!=="surprise"; }
+function setMode(k){ LS.set("mode",k); renderModes(); renderCands(); setStatus("選び方："+MODES[k].label+" — "+MODES[k].tip); }
+$("#modes").onclick=e=>{ const b=e.target.closest("[data-mode]"); if(b) setMode(b.dataset.mode); };
+$("#reroll").onclick=()=>{ S.seed=(S.seed||0)+1; renderCands(); };
+renderModes();
 $("#copyMode").value=LS.get("copyMode","title"); $("#copyMode").onchange=e=>LS.set("copyMode",e.target.value);
 $("#autoInfo").checked=LS.get("autoInfo",true); $("#autoInfo").onchange=e=>{ LS.set("autoInfo",e.target.checked); if(e.target.checked&&S.now) gatherInfo(S.now); renderInfo(); };
 

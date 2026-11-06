@@ -38,6 +38,9 @@ DJ中に「次の曲」を自分のSpotifyライブラリから提案するブ�
 ## スコアリング（`suggest()`）
 重み: wFlow（自分のプレイリスト内で直前／直後に並べた曲）、wCo（同じプレイリストに共起、1/log2(len+2)で重み付け）、wBpm（±2/4/6/8%、倍／半分テンポ可）、wKey（Camelot相性 `keyCompat`）、wGen（ジャンル一致）。
 フィルタ: BPM幅、キー一致のみ、同アーティスト回避、倍／半分可。
+選び方 `MODES`（LS `mode`、候補欄上部のボタン／Mキー）: 各モードの倍率 `m` をスライダーの重みに掛ける。
+- flow いつもの流れ（従来どおり）／similar 似た曲（`afSim`: energy・danceability・valence の近さ、ジャンル重視）／surprise 意外性（並べたことのある曲を減点、初めての組み合わせ・人気の低さ・ゆらぎ `rnd01(now:seed)` を加点。🎲／Rで `S.seed` を変えて入れ替え）／up 上げる・down 落とす（energy 差 +0.03〜0.25 を加点）
+- af（energy等）は ReccoBeats／Exportify 由来。無い曲は雰囲気・エネルギーの加点なし
 
 ## 曲情報の自動収集（`gatherInfo(id)` → `S.ex[id]`, IndexedDB "ex", 14日キャッシュ）
 Spotify（人気度・レーベル・リリース・アーティストのジャンル／フォロワー・トップ曲・別バージョン検索）／Deezer（BPM・ゲイン・ランク・アルバム）／MusicBrainz（ISRC→recording、タグ・初リリース、1req/秒）／Wikipedia REST summary（ja→en、音楽系記事のみ採用）／Discogs。
