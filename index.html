@@ -222,8 +222,13 @@
     <input type="file" id="csv" accept=".csv,text/csv" multiple>
     <div class="muted" id="csvMsg"></div>
 
-    <h2>4. BPMの自動補完（Deezer）</h2>
-    <p class="muted">SpotifyからはBPMが取れないため、BPMが分からない曲をDeezerで調べて補います（キーは取れません）。rekordbox・手入力の値がある曲には触れません。</p>
+    <h2>4. BPM・キーの自動取得（ReccoBeats）</h2>
+    <p class="muted"><a href="https://reccobeats.com/" target="_blank" rel="noopener" style="color:var(--accent)">ReccoBeats ↗</a>（無料・登録不要）にSpotifyの曲IDで問い合わせ、BPM・キー・エネルギー等を付けます。登録されていない曲もあります。rekordbox・Exportify・手入力の値がある曲には触れません。見つからなかった曲は30日後にもう一度調べます。</p>
+    <label class="ck"><input type="checkbox" id="autoRb" checked> 自動で取得（読み込み後・曲を選んだとき）</label>
+    <div style="margin-top:6px"><button id="runRb">今すぐ取得</button> <span class="muted" id="rbMsg"></span></div>
+
+    <h2>4b. BPMの自動補完（Deezer）</h2>
+    <p class="muted">ReccoBeatsでも分からなかった曲のBPMをDeezerで調べて補います（キーは取れません）。rekordbox・手入力の値がある曲には触れません。</p>
     <label class="ck"><input type="checkbox" id="autoDz" checked> プレイリスト読み込み後に自動で実行</label>
     <div style="margin-top:6px"><button id="runDz">今すぐBPMを補完</button> <span class="muted" id="dzMsg"></span></div>
 
@@ -387,7 +392,7 @@ async function scan(opt={}){
     await persist(); buildIndex(); renderPlList();
     $("#scanMsg").textContent=`完了：プレイリスト ${S.playlists.length}本 / 曲 ${Object.keys(S.tracks).length}`;
     refresh();
-    if($("#autoDz").checked) fillBpm(); else autoSync();
+    autoMeta();
   }catch(e){ $("#scanMsg").textContent="中断："+e.message; if(opt.auto) setStatus("自動取り込みを中断："+e.message); S.playlists=[...next, ...S.playlists.filter(p=>!next.find(n=>n.id===p.id))]; await persist(); buildIndex(); }
   finally{ S.scanning=false; }
 }
@@ -432,7 +437,7 @@ async function checkUpdate(){
   return updReady;
 }
 function busy(){ const a=document.activeElement;
-  return S.scanning || dzRunning || $("#dlgLib").open || !!(a && a.matches && a.matches("textarea,select,input:not([type=checkbox]):not([type=range])")); }
+  return S.scanning || dzRunning || rbRunning || $("#dlgLib").open || !!(a && a.matches && a.matches("textarea,select,input:not([type=checkbox]):not([type=range])")); }
 function maybeReload(){ if(updReady && LS.get("autoUpd",true) && !busy()) location.reload(); }
 // Spotifyの接続が切れていたら、1タブにつき1回だけ自動で再接続する（同意済みなら画面操作なしで戻ってくる）
 function tryAutoLogin(){
@@ -561,6 +566,7 @@ function setNow(id, push=true){
   if(!S.tracks[id]) return;
   if(push && S.now && S.now!==id){ S.hist.push(S.now); }
   S.now=id; LS.set("now",id); LS.set("hist",S.hist); refresh();
+  if(LS.get("autoRb",true) && rbTodo([id]).length) rbFill([id],true).then(g=>{ if(g){ if(S.now===id) refresh(); autoSync(); } });
   if(LS.get("autoInfo",true)) gatherInfo(id);
   else if(!S.meta[id]?.bpm && !(id in S.dz)) deezerBpm(S.tracks[id]).then(b=>{ S.dz[id]=b; if(b){ S.meta[id]={...(S.meta[id]||{}),bpm:b,src:"deezer"}; DB.set("meta",S.meta);} DB.set("dz",S.dz); if(S.now===id) refresh(); }).catch(()=>{});
   if(matchMedia("(max-width:760px)").matches) $("#mobileNow").scrollIntoView({block:"start"});
@@ -602,6 +608,55 @@ async function deezerBpm(t){
     const hit=sr&&sr.data&&sr.data[0]; if(hit){ await sleep(120); d=await jsonp("https://api.deezer.com/track/"+hit.id); if(d&&d.error) d=null; } }
   return d&&d.bpm>0 ? Math.round(d.bpm*10)/10 : 0;
 }
+// ---------- ReccoBeats（Spotify曲IDでBPM・キー・audio features。無料・キー不要、1回40曲まで） ----------
+let rbRunning=false;
+const RB_RETRY=30*864e5;
+function rbTodo(ids){ const now=Date.now();
+  return (ids||Object.keys(S.tracks)).filter(id=>{ if(!S.tracks[id]) return false; const m=S.meta[id]||{};
+    if(SRC_RANK[m.src||""]>=SRC_RANK.reccobeats && m.src!=="reccobeats") return false;  // 手入力・rekordbox・Exportify は触らない
+    const c=S.rb[id]; if(c===1) return false; if(c && now-c<RB_RETRY) return false; return true; }); }
+function rbApply(id,f){
+  const cur=S.meta[id]||{}; const bpm=f.tempo>0?Math.round(f.tempo*10)/10:0;
+  const pc=Number.isInteger(f.key)?f.key:-1; const key=(pc>=0&&pc<=11)?((f.mode===0?PC_MIN:PC_MAJ)[pc]+(f.mode===0?"A":"B")):null;
+  if(!bpm && !key) return false;
+  const v={...cur,src:"reccobeats"}; if(bpm) v.bpm=bpm; if(key) v.key=key;
+  const af={...(cur.af||{})}; if(f.energy!=null) af.en=f.energy; if(f.danceability!=null) af.da=f.danceability; if(f.valence!=null) af.va=f.valence; if(f.loudness!=null) af.lo=f.loudness;
+  if(Object.keys(af).length) v.af=af;
+  S.meta[id]=v; return true;
+}
+async function rbFill(ids, quiet){
+  if(rbRunning) return 0; const todo=rbTodo(ids); if(!todo.length) return 0; rbRunning=true;
+  let got=0, n=0;
+  try{
+    for(let i=0;i<todo.length;i+=40){
+      const chunk=todo.slice(i,i+40);
+      let r=null; for(let k=0;k<3;k++){ try{ r=await fetch("https://api.reccobeats.com/v1/audio-features?ids="+chunk.join(","),{headers:{Accept:"application/json"}}); }catch{ r=null; }
+        if(r && r.status===429){ await sleep((+r.headers.get("Retry-After")||5)*1000); continue; } break; }
+      if(!r || !r.ok) break;  // 落ちているときは次回に回す（未確認のまま残る）
+      const j=await r.json(); const found=new Set();
+      for(const f of j.content||[]){ const id=(String(f.href||"").match(/track\/([A-Za-z0-9]+)/)||[])[1]; if(!id||!chunk.includes(id)) continue;
+        found.add(id); if(rbApply(id,f)) got++; }
+      const now=Date.now(); for(const id of chunk) S.rb[id]=found.has(id)?1:now;
+      n+=chunk.length;
+      if(!quiet) setStatus(`ReccoBeatsでBPM・キー取得中 ${n}/${todo.length}（取得 ${got}）`);
+      if(n%400===0){ await DB.set("meta",S.meta); await DB.set("rb",S.rb); renderCands(true); }
+      await sleep(250);
+    }
+  } finally {
+    rbRunning=false; await DB.set("meta",S.meta); await DB.set("rb",S.rb);
+    if(!quiet) setStatus(`ReccoBeats：${n}曲を確認し ${got}曲にBPM・キーを付けました`);
+    if($("#rbMsg")) $("#rbMsg").textContent=`前回：${n}曲を確認し ${got}曲に付与`;
+    if(got){ if(S.now && todo.includes(S.now)) renderDeck(); renderCands(true); if(S.now) renderInfo(); }
+  }
+  return got;
+}
+// 読み込み後の自動補完：ReccoBeats → 残りをDeezer → 同期
+async function autoMeta(){
+  let got=0;
+  if(LS.get("autoRb",true)) got=await rbFill();
+  if(LS.get("autoDz",true)) fillBpm(); else if(got) autoSync();
+}
+
 let dzRunning=false;
 async function fillBpm(ids, label="Deezer"){
   if(dzRunning) return; dzRunning=true;
@@ -834,8 +889,8 @@ function syncPayload(){
   const dg={}; for(const [id,v] of Object.entries(S.dg)) if(v) dg[id]=v;
   return {v:1, at:Date.now(), meta, dg, dz:S.dz, plSel:LS.get("plSel",[]), incSaved:LS.get("incSaved",false), dj:LS.get("dj",false), copyMode:LS.get("copyMode","title"),
     weights:Object.fromEntries(["wFlow","wCo","wBpm","wKey","wGen"].map(k=>[k,LS.get(k,null)])), hist:S.hist, now:S.now}; }
-const SRC_RANK={manual:4,rekordbox:3,exportify:2,deezer:1,discogs:1,"":0};
-const SRC_LABEL={deezer:"Deezer",rekordbox:"rekordbox",exportify:"Exportify",manual:"手入力",discogs:"Discogs"};
+const SRC_RANK={manual:4,rekordbox:3,exportify:2,reccobeats:2,deezer:1,discogs:1,"":0};
+const SRC_LABEL={deezer:"Deezer",rekordbox:"rekordbox",exportify:"Exportify",reccobeats:"ReccoBeats",manual:"手入力",discogs:"Discogs"};
 function mergeMeta(remote){
   let changed=0;
   for(const [id,r] of Object.entries(remote.meta||{})){ const l=S.meta[id]||{};
@@ -993,6 +1048,8 @@ $("#plList").addEventListener("change",saveSel);
 $("#scan").onclick=()=>scan();
 $("#xml").onchange=e=>e.target.files[0]&&importXml(e.target.files[0]).catch(err=>$("#xmlMsg").textContent="読み込み失敗："+err.message);
 $("#runDz").onclick=()=>fillBpm();
+$("#autoRb").checked=LS.get("autoRb",true); $("#autoRb").onchange=e=>LS.set("autoRb",e.target.checked);
+$("#runRb").onclick=async()=>{ for(const id of Object.keys(S.rb)) if(S.rb[id]!==1) delete S.rb[id]; const g=await rbFill(); if(g) autoSync(); };
 $("#autoLib").checked=LS.get("autoLib",true); $("#autoLib").onchange=e=>LS.set("autoLib",e.target.checked);
 $("#autoUpd").checked=LS.get("autoUpd",true); $("#autoUpd").onchange=e=>LS.set("autoUpd",e.target.checked);
 $("#updBtn").onclick=()=>location.reload();
@@ -1019,7 +1076,7 @@ $("#autoInfo").checked=LS.get("autoInfo",true); $("#autoInfo").onchange=e=>{ LS.
 (async()=>{
   await DB.open();
   S.tracks=await DB.get("tracks")||{}; S.playlists=await DB.get("playlists")||[]; S.saved=await DB.get("saved")||[];
-  S.meta=await DB.get("meta")||{}; S.dz=await DB.get("dz")||{}; S.dg=await DB.get("dg")||{}; S.ex=await DB.get("ex")||{}; S.plIndex=await DB.get("plIndex")||[];
+  S.meta=await DB.get("meta")||{}; S.dz=await DB.get("dz")||{}; S.dg=await DB.get("dg")||{}; S.rb=await DB.get("rb")||{}; S.ex=await DB.get("ex")||{}; S.plIndex=await DB.get("plIndex")||[];
   for(const v of Object.values(S.ex)) v.running=false;
   S.hist=LS.get("hist",[]); S.now=LS.get("now",null);
   buildIndex();
@@ -1035,7 +1092,8 @@ $("#autoInfo").checked=LS.get("autoInfo",true); $("#autoInfo").onchange=e=>{ LS.
   refresh();
   if(S.now && LS.get("autoInfo",true)) gatherInfo(S.now);
   if(LS.get("autoSync",true) && LS.get("ghTok","")) await syncPull(true);
-  if(authed) autoRefreshLib(true);
+  if(authed) await autoRefreshLib(true);
+  if(LS.get("autoRb",true) && !S.scanning) rbFill().then(g=>{ if(g) autoSync(); });
   setTimeout(checkUpdate,20e3);
   setInterval(async()=>{ if(document.visibilityState!=="visible") return; await checkUpdate(); autoRefreshLib(); },10*60e3);
   document.addEventListener("visibilitychange",async()=>{

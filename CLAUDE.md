@@ -23,11 +23,12 @@ DJ中に「次の曲」を自分のSpotifyライブラリから提案するブ�
 - rekordbox でSpotify音源を再生しても `/me/player/currently-playing` には出ない（追従不可）→ DJモード＋手動「Nowへ」が運用
 
 ## BPM・キー・ジャンルの取得経路（src と優先順位）
-`S.meta[id] = {bpm, key(Camelot "8A"等), genre, src, af?}`。`SRC_RANK = manual:4 > rekordbox:3 > exportify:2 > deezer:1 = discogs:1`。上位の src を下位で上書きしない。
+`S.meta[id] = {bpm, key(Camelot "8A"等), genre, src, af?}`。`SRC_RANK = manual:4 > rekordbox:3 > exportify:2 = reccobeats:2 > deezer:1 = discogs:1`。上位の src を下位で上書きしない。
 - **manual**: デッキで手入力／TAP
 - **rekordbox**: ライブラリXMLエクスポートを曲名＋アーティストで照合（`importXml`, `norm`/`normLoose`）
 - **exportify**: exportify.app のCSV（「Include audio features data」ON）。`Track URI` でID直接照合。Key(0-11)+Mode → Camelot（`PC_MAJ`/`PC_MIN`）。energy等は `meta.af`（`importCsv`）
-- **deezer**: JSONP（`jsonp()`）。ISRC → `/track/isrc:` → 検索フォールバック。BPMのみ（キーなし）。`fillBpm` で一括、`gatherInfo` で曲ごと
+- **reccobeats**: `https://api.reccobeats.com/v1/audio-features?ids=`（Spotify曲IDそのまま、最大40件/回、無料・キー不要・CORS可）。tempo/key/mode → bpm・Camelot、energy等 → `meta.af`（`rbFill`, `rbApply`）。照合は返り値の `href` のトラックID。確認済みは IndexedDB "rb"（`S.rb[id]=1` 見つかった／タイムスタンプ＝未登録、30日後に再確認）。読み込み後（`autoMeta`）・起動時・`setNow` で自動。収録漏れの曲あり
+- **deezer**: JSONP（`jsonp()`）。ISRC → `/track/isrc:` → 検索フォールバック。BPMのみ（キーなし）。ReccoBeatsで取れなかった曲の補完用。新しい曲は bpm=0 のことが多い。`fillBpm` で一括、`gatherInfo` で曲ごと
 - **discogs**: 無認証 `database/search?artist=&track=`（25req/分）。ジャンル空のときだけ style を補う。`S.dg[id]` にキャッシュ、`rid` があれば `/releases/{id}` で詳細（`discogsRelease`）
 
 ## スコアリング（`suggest()`）
@@ -40,7 +41,7 @@ Spotify（人気度・レーベル・リリース・アーティストのジャ�
 表示は `renderInfo()`（#infoBody）。チェックボックス `#autoInfo` でON/OFF。
 
 ## 同期・保存
-- IndexedDB "yotsuji-next" store "kv"（`DB.get/set`）: tracks, meta, dz, dg, ex, plIndex。localStorage（`LS`）: cid, tok, now, hist, weights, 各設定
+- IndexedDB "yotsuji-next" store "kv"（`DB.get/set`）: tracks, meta, dz, dg, rb, ex, plIndex。localStorage（`LS`）: cid, tok, now, hist, weights, 各設定
 - GitHub Gist 同期（`syncPush/syncPull/mergeMeta`）: ファイル `yotsuji-next-sync.json`、トークンは LS `ghTok`（UIで入力、コードに書かない）。meta は SRC_RANK の高い方を採用してマージ
 
 ## 自動化（「極力自動で」の方針）
