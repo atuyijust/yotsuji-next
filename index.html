@@ -516,12 +516,16 @@ function cleanTitle(n){ return String(n||"").replace(/\s*[\(\[].*?[\)\]]/g,"").r
 async function discogsInfo(id){
   if(id in S.dg) return S.dg[id];
   const t=S.tracks[id]; if(!t) return null;
-  const tries=[t.artists[0]?.name+" "+t.name, t.artists[0]?.name+" "+cleanTitle(t.name)];
+  const a0=t.artists[0]?.name||"";
+  const tries=["artist="+encodeURIComponent(a0)+"&track="+encodeURIComponent(cleanTitle(t.name)), "q="+encodeURIComponent(a0+" "+t.name)+"&type=release"];
   let v=null;
   for(const q of tries){
-    try{ const r=await fetch("https://api.discogs.com/database/search?q="+encodeURIComponent(q)+"&type=release&per_page=5",{headers:{Accept:"application/json"}});
+    try{ const r=await fetch("https://api.discogs.com/database/search?"+q+"&per_page=5",{headers:{Accept:"application/json"}});
       if(r.status===429){ setStatus("Discogsの上限（25回/分）に達しました。少し待ちます"); break; }
-      if(!r.ok) break; const j=await r.json(); const hit=(j.results||[]).find(x=>x.genre||x.style)||(j.results||[])[0];
+      if(!r.ok) break; const j=await r.json();
+      const an=norm(a0);
+      const ok=(j.results||[]).filter(x=>{ const ti=norm(x.title||""); return an && ti.includes(an); });
+      const hit=ok.find(x=>x.style&&x.style.length)||ok[0];
       if(hit){ v={genre:hit.genre||[],style:hit.style||[],label:(hit.label||[]).slice(0,2),year:hit.year||"",country:hit.country||"",url:hit.uri?"https://www.discogs.com"+hit.uri:""}; break; }
     }catch(e){ break; }
   }
