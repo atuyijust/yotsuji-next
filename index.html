@@ -58,6 +58,7 @@
   .sl{display:grid;grid-template-columns:110px 1fr 28px;gap:6px;align-items:center;margin:4px 0}
   .sl span:last-child{font-family:var(--mono);color:var(--dim);text-align:right}
   .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  .more{text-align:center;padding:12px 0 20px} .more button{padding:6px 18px}
   .cand .sub{font:11px var(--mono);color:var(--dim);margin-top:1px}
   .cand .sub .gen{color:var(--accent2)} .cand .sub .af{cursor:help}
   .gp{display:inline-block;font:600 11px/1.5 system-ui,sans-serif;padding:0 7px;border-radius:9px;margin-left:6px;vertical-align:2px;white-space:nowrap;
@@ -682,12 +683,15 @@ function later(fn){ if(pressing){ deferred.add(fn); return true; } return false;
 document.addEventListener("pointerdown",()=>{ pressing=true; },true);
 const release=()=>{ if(!pressing) return; pressing=false; setTimeout(()=>{ const fs=[...deferred]; deferred.clear(); fs.forEach(f=>f()); },0); };
 document.addEventListener("pointerup",release,true); document.addEventListener("pointercancel",release,true);
-let candsHtml="";
+let candsHtml="", candLimit=60, candCtx="";  // 候補は上位から60曲ずつ描く（全部描くと重い）。Nowや条件が変わると60に戻る
 function renderCands(keepSel){
   if(!S.now){ return; }
   if(later(()=>renderCands(true))) return;
   if(!keepSel) sel=0;
-  const list=suggest(); const top=list.slice(0,60);
+  // Now・選び方・絞り込みが変わったときだけ60曲に戻す（裏での描き直しでは戻さない）
+  const ck=[S.now,LS.get("mode","flow"),$("#fBpm").value,$("#fKey").checked,$("#fArtist").checked,$("#fHalf").checked,LS.get("fTag","")].join("|");
+  if(ck!==candCtx){ candCtx=ck; candLimit=60; }
+  const list=suggest(); const top=list.slice(0,candLimit);
   $("#candInfo").textContent = list.weak?`候補 ${list.length}曲（参考）`:`候補 ${list.length}曲`;
   if(!top.length){ candsHtml=""; $("#cands").innerHTML=`<div class="empty">条件に合う候補がありません。フィルタを緩めるか、この曲を含むプレイリストを読み込んでください。</div>`; return; }
   const max=top[0].sc, lm=labelMap();
@@ -696,7 +700,9 @@ function renderCands(keepSel){
       <div><div class="nm">${esc(t.name)}${(()=>{ const gl=genreList(c.id,lm); return gl.length?genrePill(gl[0]):`<span class="gp none" title="ジャンル不明">？</span>`; })()}</div><div class="muted">${esc(arts(t))}</div>${subLine(c.id,lm)}<div class="chips">${c.chips.map(([k,x])=>`<span class="chip ${k}">${esc(x)}</span>`).join("")}</div></div>
       <span class="meta">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="meta" style="color:var(--accent2)">${m.key||"—"}</span>
       <span class="acts"><button class="sm" data-c="${c.id}" title="曲名をコピー（rekordboxの検索に貼り付け）">⎘</button><button class="sm" data-q="${c.id}">キュー</button><button class="sm" data-p="${c.id}">再生</button><button class="sm" data-n="${c.id}">Nowへ</button></span></div>`; }).join("");
-  const html=(list.weak?`<div class="empty" style="padding:8px 0">今の曲の手がかり（BPM・キー・プレイリスト・音の特徴）が少ないので、参考として並べています。BPM／キーを入れるか、この曲を含むプレイリストを読み込むと精度が上がります。</div>`:"")+rows;
+  let html=(list.weak?`<div class="empty" style="padding:8px 0">今の曲の手がかり（BPM・キー・プレイリスト・音の特徴）が少ないので、参考として並べています。BPM／キーを入れるか、この曲を含むプレイリストを読み込むと精度が上がります。</div>`:"")+rows;
+  const rest=list.length-top.length;
+  if(rest>0) html+=`<div class="more"><button class="sm" id="moreCands">もっと見る（+${Math.min(60,rest)}曲 / 残り${rest}曲）</button></div>`;
   if(html!==candsHtml){ candsHtml=html; $("#cands").innerHTML=html; }  // 変化がなければ触らない
 }
 // ---------- タグ（自分で付ける。例: ピーク・朝方・ボーカル） ----------
@@ -1295,6 +1301,7 @@ $("#djMode").onchange=e=>setDj(e.target.checked);
 function openLib(){ $("#redir").textContent=REDIRECT; $("#cid").value=LS.get("cid",""); $("#ghTok").value=LS.get("ghTok","")?"••••••••":""; $("#ghTok").placeholder=LS.get("ghTok","")?"保存済み（変えるときだけ入力）":"github_pat_…"; $("#incSaved").checked=LS.get("incSaved",false); renderPlList(); $("#dlgLib").showModal(); }
 document.addEventListener("click",e=>{
   if(e.target.closest("[data-undo]")){ undoNow(); return; }
+  if(e.target.closest("#moreCands")){ candLimit+=60; renderCands(true); return; }
   const b=e.target.closest("[data-q],[data-p],[data-n],[data-c],[data-v]"); if(!b) return;
   if(b.dataset.v){ const [src,kind,i]=b.dataset.v.split(":"); const x=S.ex[src]?.sp?.[kind]?.[+i]; if(x){ if(!S.tracks[x.id]) S.tracks[x.id]=x; setNow(x.id); } }
   else if(b.dataset.c){ copyTrack(b.dataset.c,b); }

@@ -66,6 +66,7 @@ Spotify（人気度・レーベル・リリース・アーティストのジャ�
 - キーボード: ↑↓/j/k 選択、Enter→Nowへ、/ 検索、Esc、U 取り消し、C 曲名コピー（`#copyMode`）
 - 左右の仕切り `#split`: ドラッグ／←→キーで左ペイン幅（CSS変数 `--side`、240px〜画面幅−380px）。LS `sideW` に保存、ダブルクリックで340pxに戻す。モバイルでは非表示
 - Nowの取り消し: デッキ／モバイルバーの「↶ 戻す」（`data-undo`）とUキー → `undoNow()`
+- 候補は上位60曲ずつ（`candLimit`）。一番下の「もっと見る」で+60。Now・選び方・絞り込みが変わったときだけ60に戻す（`candCtx`）
 - 押している最中は描き直さない: `pressing`/`later(fn)`。renderCands・renderDeck・renderInfo は押下中なら離した後に回す（押した要素が差し替わるとクリックが消え「2回押さないと効かない」になるため）。renderCands は HTML が同じなら書き換えない
 - 再生／キュー（`play`/`queue` → `withDevice`）: 404（動いているデバイスなし）なら `/me/player/devices` から開いているSpotify（アクティブ→Computer→Smartphone）を選んで `device_id` 付きで再送。403＝Premiumのみ等は `playErr` で日本語の理由を出す。NOW PLAYING（デッキ）にも ▶ 再生。指示が通っても Mac の Spotify アプリが曲を読み込まず「無」になることがあるので、`confirmPlay` で `/me/player` の曲を確認 → 違えばアルバム文脈（`context_uri`+`offset`）で再送 → それでもだめなら `spotify:track:` リンクでアプリに曲を開く。`toast()` は画面下にも浮かせて出す（#status だけだと押しても反応がないように見えた）
 - DJモード（`setDj`）: 再生／キューボタンを隠し追従を止める
