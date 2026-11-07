@@ -497,13 +497,13 @@ function genOf(id){ return (S.meta[id]?.genre||"").toLowerCase().split(/[\/,;]/)
 // 選び方（モード）ごとの倍率。スライダーの重みに掛ける。af=雰囲気の近さ, nov=初めての組み合わせ, rnd=ゆらぎ, pop=人気の低さ, eng=エネルギーの上げ下げ
 const MODES={
   flow:    {label:"いつもの流れ", tip:"自分のプレイリストで並べた順を重視",                      m:{flow:1,   co:1,   bpm:1,key:1,gen:1,  af:0, nov:0, rnd:0,  pop:0, eng:0}},
-  similar: {label:"似た曲",       tip:"音の特徴（エネルギー・ダンス度・明るさ・生音っぽさ・インスト度・ボーカル量・音量をライブラリ内で比較）・ジャンル・同じPLから見て雰囲気が近い曲",            m:{flow:.3,  co:.6,  bpm:1,key:1,gen:1.5,af:3, nov:0, rnd:0,  pop:0, eng:0}},
+  similar: {label:"似た曲",       tip:"音の特徴（エネルギー・ダンス度・明るさ・生音っぽさ・インスト度・ボーカル量・音量をライブラリ内で比較）とジャンルから見て雰囲気が近い曲",            m:{flow:.3,  co:.6,  bpm:1,key:1,gen:1.5,af:3, nov:0, rnd:0,  pop:0, eng:0}},
   surprise:{label:"意外性",       tip:"つながる（BPM・キー）けど、まだ並べたことのない曲。🎲で入れ替え", m:{flow:-.6, co:-.3, bpm:1,key:1,gen:.3, af:.8,nov:2, rnd:1.5,pop:1, eng:0}},
   up:      {label:"上げる",       tip:"今よりエネルギーが少し高い曲",                              m:{flow:.5,  co:.5,  bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0,  pop:0, eng:3}},
   down:    {label:"落とす",       tip:"今よりエネルギーが少し低い曲",                              m:{flow:.5,  co:.5,  bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0,  pop:0, eng:3}},
 };
 const afOf=id=>S.meta[id]?.af||null;
-// 「雰囲気が近い」: 音の特徴（自分のライブラリ内での散らばりで割った距離）＋ジャンルの重なり＋同じPLに入っているか
+// 「雰囲気が近い」: 音の特徴（自分のライブラリ内での散らばりで割った距離）＋ジャンルの重なり（同じPLかどうかは含めない＝wCoで別に加点）
 const AF_W={en:1.5,da:1.2,va:1,ac:.8,ins:.8,sp:.6,lo:.5};
 function afStats(){ const st={};
   for(const k of Object.keys(AF_W)){ let n=0,sum=0,sq=0;
@@ -524,7 +524,6 @@ function vibe(cur,id,ctx){ const parts=[];
   const s=afSim(ctx.curAf,afOf(id),ctx.st); if(s!=null) parts.push(["音",s,.6]);
   const g=genreSim(ctx.curG,genreSet(id,ctx.lm)); if(g!=null) parts.push(["ジャンル",g,.25]);
   if(!parts.length) return null;
-  parts.push(["同じPL",ctx.co[id]?1:0,.15]);
   const w=parts.reduce((x,p)=>x+p[2],0), v=parts.reduce((x,p)=>x+p[1]*p[2],0)/w;
   return {v, why:parts.filter(p=>p[1]>=.5).map(p=>p[0])}; }
 function rnd01(str){ let h=2166136261; for(let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619); } return ((h>>>0)%10000)/10000; }
@@ -542,7 +541,7 @@ function suggest(){
     for(const id of new Set(ids)) co[id]=(co[id]||0)+wgt;
   }
   const curBpm=bpmOf(cur), curKey=keyOf(cur), curGen=genOf(cur), curArt=new Set(S.tracks[cur]?.artists.map(a=>a.id)), curAf=afOf(cur);
-  const lm=labelMap(), vctx={curAf, st:M.af?afStats():{}, lm, curG:genreSet(cur,lm), co};
+  const lm=labelMap(), vctx={curAf, st:M.af?afStats():{}, lm, curG:genreSet(cur,lm)};
   const fB=+$("#fBpm").value, fK=$("#fKey").checked, fA=$("#fArtist").checked, half=$("#fHalf").checked;
   const W={flow:w("wFlow")*M.flow,co:w("wCo")*M.co,bpm:w("wBpm")*M.bpm,key:w("wKey")*M.key,gen:w("wGen")*M.gen,af:M.af,nov:M.nov,rnd:M.rnd,pop:M.pop,eng:M.eng};
   const seed=cur+":"+(S.seed||0);
