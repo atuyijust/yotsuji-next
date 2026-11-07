@@ -761,7 +761,7 @@ async function play(id){ const t=S.tracks[id], uri=t.uri||("spotify:track:"+id);
   let dev="";
   const send=body=>withDevice(dv=>{ if(dv) dev=dv; return api(`/me/player/play${(dv||dev)?"?device_id="+(dv||dev):""}`,{method:"PUT",body:JSON.stringify(body)}); },"再生");
   if(!(await send({uris:[uri]}))) return;
-  if(S.now!==id) setNow(id);
+  S.previewId=id;  // 候補を試し聴きしてもNowは変えない（再生追従でも拾わない）
   if(await confirmPlay(id)){ toast("再生："+t.name); return; }
   // 2回目: アルバムの中のその曲として再生（単曲指定で読み込めないときに効くことがある）
   if(t.albumId){ toast("Spotifyで読み込めなかったので、アルバムから再生し直しています…");
@@ -773,6 +773,8 @@ async function play(id){ const t=S.tracks[id], uri=t.uri||("spotify:track:"+id);
 let pollTimer=null;
 async function poll(){
   try{ const j=await api("/me/player/currently-playing"); const t=j&&j.item&&slimTrack(j.item);
+    if(t && (t.id===S.previewId || j.item.linked_from?.id===S.previewId)){ S.lastPlayingId=t.id; return; }  // 再生ボタンで試し聴き中の曲
+    if(t) S.previewId=null;  // 試し聴きの曲から別の曲に変わったら、通常の追従に戻す
     if(t && t.id!==S.lastPlayingId){ S.lastPlayingId=t.id; if(!S.tracks[t.id]) S.tracks[t.id]=t; if(t.id!==S.now) setNow(t.id); } }
   catch(e){ setStatus("追従エラー："+e.message); }
 }

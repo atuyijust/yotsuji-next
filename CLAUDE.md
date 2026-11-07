@@ -69,7 +69,7 @@ Spotify（人気度・レーベル・リリース・アーティストのジャ�
 - 候補は上位60曲ずつ（`candLimit`）。一番下の「もっと見る」で+60。Now・選び方・絞り込みが変わったときだけ60に戻す（`candCtx`）
 - 候補の先頭へ: 下へスクロールすると左下（候補欄の左端、Nowへボタンと重ならない位置。スマホは右下）に「↑ 先頭へ」が浮かぶ（`#toTop`、`toTopCheck`）。Homeキーでも。選択も先頭に戻す
 - 押している最中は描き直さない: `pressing`/`later(fn)`。renderCands・renderDeck・renderInfo は押下中なら離した後に回す（押した要素が差し替わるとクリックが消え「2回押さないと効かない」になるため）。renderCands は HTML が同じなら書き換えない
-- 再生／キュー（`play`/`queue` → `withDevice`）: 404（動いているデバイスなし）なら `/me/player/devices` から開いているSpotify（アクティブ→Computer→Smartphone）を選んで `device_id` 付きで再送。403＝Premiumのみ等は `playErr` で日本語の理由を出す。NOW PLAYING（デッキ）にも ▶ 再生。指示が通っても Mac の Spotify アプリが曲を読み込まず「無」になることがあるので、`confirmPlay` で `/me/player` の曲を確認 → 違えばアルバム文脈（`context_uri`+`offset`）で再送 → それでもだめなら `spotify:track:` リンクでアプリに曲を開く。`toast()` は画面下にも浮かせて出す（#status だけだと押しても反応がないように見えた）
+- 再生／キュー（`play`/`queue` → `withDevice`）: 404（動いているデバイスなし）なら `/me/player/devices` から開いているSpotify（アクティブ→Computer→Smartphone）を選んで `device_id` 付きで再送。403＝Premiumのみ等は `playErr` で日本語の理由を出す。NOW PLAYING（デッキ）にも ▶ 再生。再生ボタンは試し聴きで Now を変えない（ユーザー指定）。`S.previewId` に入れ、再生追従 `poll` もその曲は拾わない（別の曲に変わったら通常の追従に戻る）。指示が通っても Mac の Spotify アプリが曲を読み込まず「無」になることがあるので、`confirmPlay` で `/me/player` の曲を確認 → 違えばアルバム文脈（`context_uri`+`offset`）で再送 → それでもだめなら `spotify:track:` リンクでアプリに曲を開く。`toast()` は画面下にも浮かせて出す（#status だけだと押しても反応がないように見えた）
 - DJモード（`setDj`）: 再生／キューボタンを隠し追従を止める
 - モバイル（@media max-width:760px）: 1カラム、`#mobileNow` 固定バー、`<details class="side">` で重み付け／履歴を折りたたみ
 
