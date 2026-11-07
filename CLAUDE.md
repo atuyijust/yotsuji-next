@@ -27,19 +27,19 @@ DJ中に「次の曲」を自分のSpotifyライブラリから提案するブ�
 - **manual**: デッキで手入力／TAP
 - **rekordbox**: ライブラリXMLエクスポートを曲名＋アーティストで照合（`importXml`, `norm`/`normLoose`）
 - **exportify**: exportify.app のCSV（「Include audio features data」ON）。`Track URI` でID直接照合。Key(0-11)+Mode → Camelot（`PC_MAJ`/`PC_MIN`）。energy等は `meta.af`（`importCsv`）
-- **reccobeats**: `https://api.reccobeats.com/v1/audio-features?ids=`（Spotify曲IDそのまま、最大40件/回、無料・キー不要・CORS可）。tempo/key/mode → bpm・Camelot、energy等 → `meta.af`（`rbFill`, `rbApply`）。照合は返り値の `href` のトラックID。確認済みは IndexedDB "rb"（`S.rb[id]=1` 見つかった／タイムスタンプ＝未登録、30日後に再確認）。読み込み後（`autoMeta`）・起動時・`setNow` で自動。収録漏れの曲あり
+- **reccobeats**: `https://api.reccobeats.com/v1/audio-features?ids=`（Spotify曲IDそのまま、最大40件/回、無料・キー不要・CORS可）。tempo/key/mode → bpm・Camelot、energy等 → `meta.af`（`rbFill`, `rbApply`）。照合は返り値の `href` のトラックID。確認済みは IndexedDB "rb"（`S.rb[id]=2` 取得済み／1＝旧形式（特徴量を足すため一度だけ取り直す）／タイムスタンプ＝未登録、30日後に再確認）。特徴量 `RB_FEAT` → af の en/da/va/lo/ac/ins/sp。上位 src の曲も問い合わせ、空欄と af だけ埋める。読み込み後（`autoMeta`）・起動時・`setNow` で自動。収録漏れの曲あり
 - **deezer**: JSONP（`jsonp()`）。ISRC → `/track/isrc:` → 検索フォールバック。BPMのみ（キーなし）。ReccoBeatsで取れなかった曲の補完用。新しい曲は bpm=0 のことが多い。`fillBpm` で一括、`gatherInfo` で曲ごと
 - **discogs**: 無認証 `database/search?artist=&track=`（25req/分）。ジャンル空のときだけ style を補う。`S.dg[id]` にキャッシュ、`rid` があれば `/releases/{id}` で詳細（`discogsRelease`）
 
 ## 曲データ（`slimTrack`）
 `{id, uri, name, artists, album, albumId, dur, isrc, img, pop, year}`。`pop` は Spotify人気度（TRACK_VER=2 で追加。LS `trackVer` が古いと次の読み込みで全PLを一度だけ読み直す）。
-候補行の2行目 `subLine()`: 長さ・POP・レーベル。レーベルは通信せず、集めた曲情報（`S.ex`）→ 同じアルバムの曲の情報（`labelMap`）→ Exportify → Discogs の順で分かるものだけ。
+候補行の下 `subLine()`: 1行目 長さ・年・POP・レーベル、2行目 ジャンル（meta.genre → 集めたアーティストのSpotifyジャンル）・AF（E/D/V＝energy/danceability/valence×100）。レーベルは通信せず、集めた曲情報（`S.ex`）→ 同じアルバムの曲の情報（`labelMap`）→ Exportify → Discogs の順で分かるものだけ。
 
 ## スコアリング（`suggest()`）
 重み: wFlow（自分のプレイリスト内で直前／直後に並べた曲）、wCo（同じプレイリストに共起、1/log2(len+2)で重み付け）、wBpm（±2/4/6/8%、倍／半分テンポ可）、wKey（Camelot相性 `keyCompat`）、wGen（ジャンル一致）。
 フィルタ: BPM幅、キー一致のみ、同アーティスト回避、倍／半分可。
 選び方 `MODES`（LS `mode`、候補欄上部のボタン／Mキー）: 各モードの倍率 `m` をスライダーの重みに掛ける。
-- flow いつもの流れ（従来どおり）／similar 似た曲（`afSim`: energy・danceability・valence の近さ、ジャンル重視）／surprise 意外性（並べたことのある曲を減点、初めての組み合わせ・人気の低さ・ゆらぎ `rnd01(now:seed)` を加点。🎲／Rで `S.seed` を変えて入れ替え）／up 上げる・down 落とす（energy 差 +0.03〜0.25 を加点）
+- flow いつもの流れ（従来どおり）／similar 似た曲（`vibe()`: 音 `afSim` 0.6＋ジャンル `genreSim` 0.25＋同じPL 0.15。`afSim` は7特徴量 `AF_W` をライブラリ内の標準偏差 `afStats()` で割った重み付き距離 → 散らばり1つ分で50%。ジャンルはmeta.genre＋集めたアーティストのSpotifyジャンル、完全一致1・単語一致0.5。チップに理由（音・ジャンル・同じPL））／surprise 意外性（並べたことのある曲を減点、初めての組み合わせ・人気の低さ・ゆらぎ `rnd01(now:seed)` を加点。🎲／Rで `S.seed` を変えて入れ替え）／up 上げる・down 落とす（energy 差 +0.03〜0.25 を加点）
 - af（energy等）は ReccoBeats／Exportify 由来。無い曲は雰囲気・エネルギーの加点なし
 
 ## 曲情報の自動収集（`gatherInfo(id)` → `S.ex[id]`, IndexedDB "ex", 14日キャッシュ）
@@ -61,6 +61,8 @@ Spotify（人気度・レーベル・リリース・アーティストのジャ�
 ## UI
 - キーボード: ↑↓/j/k 選択、Enter→Nowへ、/ 検索、Esc、U 取り消し、C 曲名コピー（`#copyMode`）
 - 左右の仕切り `#split`: ドラッグ／←→キーで左ペイン幅（CSS変数 `--side`、240px〜画面幅−380px）。LS `sideW` に保存、ダブルクリックで340pxに戻す。モバイルでは非表示
+- Nowの取り消し: デッキ／モバイルバーの「↶ 戻す」（`data-undo`）とUキー → `undoNow()`
+- 押している最中は描き直さない: `pressing`/`later(fn)`。renderCands・renderDeck・renderInfo は押下中なら離した後に回す（押した要素が差し替わるとクリックが消え「2回押さないと効かない」になるため）。renderCands は HTML が同じなら書き換えない
 - DJモード（`setDj`）: 再生／キューボタンを隠し追従を止める
 - モバイル（@media max-width:760px）: 1カラム、`#mobileNow` 固定バー、`<details class="side">` で重み付け／履歴を折りたたみ
 
