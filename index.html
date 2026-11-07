@@ -600,7 +600,7 @@ function renderDeck(){
   $("#mobileNow").innerHTML=`<b>NOW</b>${esc(t.name)} <span class="muted">— ${esc(arts(t))}</span><span class="m">${m.bpm?m.bpm.toFixed(1):"—"} ${m.key||""}</span>${undo?" "+undo:""}`;
   $("#deck").innerHTML=`<div class="row"><img src="${esc(t.img)}" alt=""><div><div class="t">${esc(t.name)}</div><div class="a">${esc(arts(t))}</div><div class="muted">${esc(t.album)} ${t.year||""}</div></div></div>
    <div class="bk"><span class="big">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="muted">BPM</span><span class="big k">${m.key||"—"}</span><span class="muted">${m.genre?esc(m.genre):""} ${m.src?"("+(SRC_LABEL[m.src]||m.src)+(m.kSrc&&m.kSrc!==m.src?" / キー: "+(SRC_LABEL[m.kSrc]||m.kSrc):"")+(m.bSrc&&m.bSrc!==m.src?" / BPM: "+(SRC_LABEL[m.bSrc]||m.bSrc):"")+")":""}</span></div>
-   <div class="bk"><input id="eBpm" placeholder="BPM" value="${m.bpm||""}"><input id="eKey" placeholder="キー 8A/Am" value="${m.key||""}"><button class="sm" id="saveMeta">保存</button><button class="sm" id="tap">TAP</button><button class="sm" data-c="${t.id}" title="曲名をコピー">⎘ コピー</button>${undo}<span class="muted" id="tapv"></span></div>`;
+   <div class="bk"><input id="eBpm" placeholder="BPM" value="${m.bpm||""}"><input id="eKey" placeholder="キー 8A/Am" value="${m.key||""}"><button class="sm" id="saveMeta">保存</button><button class="sm" id="tap">TAP</button><button class="sm" data-p="${t.id}" title="Spotifyで再生">▶ 再生</button><button class="sm" data-c="${t.id}" title="曲名をコピー">⎘ コピー</button>${undo}<span class="muted" id="tapv"></span></div>`;
   $("#saveMeta").onclick=()=>{ const bpm=parseFloat($("#eBpm").value)||null; const kRaw=$("#eKey").value.trim(); const key=toCamelot(kRaw);
     if(kRaw && !key){ toast("キーは 8A や Am の形で入力してください"); return; }
     const {kSrc,bSrc,...rest}=S.meta[t.id]||{}; S.meta[t.id]={...rest,bpm,key,src:"manual"}; DB.set("meta",S.meta); refresh(); autoSync(); };
@@ -663,8 +663,24 @@ function setNow(id, push=true){
 }
 
 // ---------- 再生操作 ----------
-async function queue(id){ try{ await api(`/me/player/queue?uri=${encodeURIComponent(S.tracks[id].uri)}`,{method:"POST"}); toast("キューに追加："+S.tracks[id].name); }catch(e){ toast("キュー追加に失敗（Spotifyでどこかのデバイスを再生中にしてください）: "+e.message); } }
-async function play(id){ try{ await api(`/me/player/play`,{method:"PUT",body:JSON.stringify({uris:[S.tracks[id].uri]})}); setNow(id); }catch(e){ toast("再生に失敗："+e.message); } }
+// 再生／キュー: 動いているデバイスがなければ、開いているSpotifyを探してそこで鳴らす
+async function pickDevice(){
+  const j=await api("/me/player/devices").catch(()=>null); const ds=(j?.devices||[]).filter(d=>!d.is_restricted);
+  return ds.find(d=>d.is_active)||ds.find(d=>d.type==="Computer")||ds.find(d=>d.type==="Smartphone")||ds[0]||null; }
+function playErr(e,what){ const m=e.message||"";
+  if(/^403/.test(m)) return `${what}できません：Spotifyからの操作は Premium アカウントのみです（${m}）`;
+  if(/^404/.test(m)||/NO_ACTIVE_DEVICE/i.test(m)) return `${what}できません：Spotifyアプリ（PC／スマホ）を開いてから、もう一度押してください`;
+  if(/未ログイン/.test(m)) return `${what}できません：Spotifyにログインしてください`;
+  return `${what}に失敗：${m}`; }
+async function withDevice(fn,what){
+  try{ await fn(""); return true; }catch(e){
+    if(!/^404/.test(e.message||"")){ toast(playErr(e,what)); return false; }
+    const d=await pickDevice(); if(!d){ toast(playErr(e,what)); return false; }
+    try{ await fn(d.id); return true; }catch(e2){ toast(playErr(e2,what)); return false; } } }
+async function queue(id){ const uri=S.tracks[id].uri;
+  if(await withDevice(dv=>api(`/me/player/queue?uri=${encodeURIComponent(uri)}${dv?"&device_id="+dv:""}`,{method:"POST"}),"キュー追加")) toast("キューに追加："+S.tracks[id].name); }
+async function play(id){ const uri=S.tracks[id].uri;
+  if(await withDevice(dv=>api(`/me/player/play${dv?"?device_id="+dv:""}`,{method:"PUT",body:JSON.stringify({uris:[uri]})}),"再生")){ toast("再生："+S.tracks[id].name); if(S.now!==id) setNow(id); } }
 let pollTimer=null;
 async function poll(){
   try{ const j=await api("/me/player/currently-playing"); const t=j&&j.item&&slimTrack(j.item);
