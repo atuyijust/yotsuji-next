@@ -28,7 +28,7 @@ DJ中に「次の曲」を自分のSpotifyライブラリから提案するブ�
 - **rekordbox**: ライブラリXMLエクスポートを曲名＋アーティストで照合（`importXml`, `norm`/`normLoose`）。ゆるい照合（括弧・「 - 」以降を除く）は「版」`verKey()` が同じときだけ（Remix/Edit/Bootleg等は別の曲、Original/Extended/Radio Edit・リマスター・feat. は同じ扱い `VER_NEUTRAL`）。以前の取り込みで別の版と取り違えた rekordbox 値は再取り込み時に消して（af は残す）ReccoBeats/Deezer で取り直す。消した印 `rbBad:1` を付け、Gist 同期の `mergeMeta` で他端末の古い rekordbox 値に戻されないようにする（逆に他端末の rbBad は受け取る）。照合した rekordbox の曲名を `meta.rbName` に保存し、名前が違えばデッキに「← rekordbox「…」」と出す
 - **exportify**: exportify.app のCSV（「Include audio features data」ON）。`Track URI` でID直接照合。Key(0-11)+Mode → Camelot（`PC_MAJ`/`PC_MIN`）。energy等は `meta.af`（`importCsv`）
 - **reccobeats**: `https://api.reccobeats.com/v1/audio-features?ids=`（Spotify曲IDそのまま、最大40件/回、無料・キー不要・CORS可）。tempo/key/mode → bpm・Camelot、energy等 → `meta.af`（`rbFill`, `rbApply`）。照合は返り値の `href` のトラックID。確認済みは IndexedDB "rb"（`S.rb[id]=2` 取得済み／1＝旧形式（特徴量を足すため一度だけ取り直す）／タイムスタンプ＝未登録、30日後に再確認）。特徴量 `RB_FEAT` → af の en/da/va/lo/ac/ins/sp。上位 src の曲も問い合わせ、空欄と af だけ埋める。読み込み後（`autoMeta`）・起動時・`setNow` で自動。収録漏れの曲あり
-- **deezer**: JSONP（`jsonp()`）。ISRC → `/track/isrc:` → 検索フォールバック。BPMのみ（キーなし）。ReccoBeatsで取れなかった曲の補完用。新しい曲は bpm=0 のことが多い。`fillBpm` で一括、`gatherInfo` で曲ごと
+- **deezer**: JSONP（`jsonp()`）。ISRC → `/track/isrc:` → 検索フォールバック。BPMのみ（キーなし）。ReccoBeatsで取れなかった曲の補完用。新しい曲は bpm=0 のことが多い。倍テンポで返すことがあるので 185 超えは半分（`dzB`）。`setNow` で BPM が空なら取得済みの `S.dz[id]` を使う。`fillBpm` で一括、`gatherInfo` で曲ごと
 - **discogs**: 無認証 `database/search?artist=&track=`（25req/分）。ジャンル空のときだけ style を補う。`S.dg[id]` にキャッシュ、`rid` があれば `/releases/{id}` で詳細（`discogsRelease`）
 
 ## 曲データ（`slimTrack`）
@@ -37,7 +37,7 @@ DJ中に「次の曲」を自分のSpotifyライブラリから提案するブ�
 
 ## スコアリング（`suggest()`）
 重み: wFlow（自分のプレイリスト内で直前／直後に並べた曲）、wCo（同じプレイリストに共起、1/log2(len+2)で重み付け）、wBpm（±2/4/6/8%、倍／半分テンポ可）、wKey（Camelot相性 `keyCompat`）、wGen（ジャンル一致）。
-フィルタ: BPM幅、キー一致のみ、同アーティスト回避、倍／半分可。
+フィルタ: BPM幅、キー一致のみ、同アーティスト回避、倍／半分可。今の曲の手がかりが少なく1曲も残らないときは、点の低い曲も「候補 N曲（参考）」として注記付きで出す（`weak`）。
 選び方 `MODES`（LS `mode`、候補欄上部のボタン／Mキー）: 各モードの倍率 `m` をスライダーの重みに掛ける。
 - flow いつもの流れ（従来どおり）／similar 似た曲（`vibe()`: 音 `afSim` 0.6＋ジャンル `genreSim` 0.25（同じPLは含めない。ユーザー指定）。`afSim` は7特徴量 `AF_W` をライブラリ内の標準偏差 `afStats()` で割った重み付き距離 → 散らばり1つ分で50%。ジャンルはmeta.genre＋集めたアーティストのSpotifyジャンル、完全一致1・単語一致0.5。チップに理由（音・ジャンル））／surprise 意外性（並べたことのある曲を減点、初めての組み合わせ・人気の低さ・ゆらぎ `rnd01(now:seed)` を加点。🎲／Rで `S.seed` を変えて入れ替え）／up 上げる・down 落とす（energy 差 +0.03〜0.25 を加点）
 - af（energy等）は ReccoBeats／Exportify 由来。無い曲は雰囲気・エネルギーの加点なし

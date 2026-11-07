@@ -548,7 +548,7 @@ function suggest(){
   const W={flow:w("wFlow")*M.flow,co:w("wCo")*M.co,bpm:w("wBpm")*M.bpm,key:w("wKey")*M.key,gen:w("wGen")*M.gen,af:M.af,nov:M.nov,rnd:M.rnd,pop:M.pop,eng:M.eng};
   const seed=cur+":"+(S.seed||0);
   const pool = new Set([...Object.keys(S.occ), ...S.saved]);
-  const res=[];
+  const res=[], weak=[];
   for(const id of pool){
     if(played.has(id)) continue; const t=S.tracks[id]; if(!t) continue;
     const sameArt = t.artists.some(a=>curArt.has(a.id));
@@ -579,10 +579,12 @@ function suggest(){
     if(W.pop && t.pop!=null){ sc+=W.pop*(1-t.pop/100)*.6; if(t.pop<30) chips.push(["y","隠れた曲"]); }
     if(W.rnd) sc+=W.rnd*rnd01(seed+id);
     if(sameArt){ sc+=0.3; chips.push(["y","同アーティスト"]); }
-    if(sc<=0) continue;
+    if(sc<=0){ weak.push({id,sc,chips}); continue; }
     res.push({id,sc,chips});
   }
   res.sort((a,b)=>b.sc-a.sc);
+  // 今の曲に手がかり（BPM・キー・PL・音）が少なくて1曲も残らないときは、点の高い順に参考として出す
+  if(!res.length && weak.length){ weak.sort((a,b)=>b.sc-a.sc); weak.weak=true; return weak; }
   return res;
 }
 
@@ -643,14 +645,15 @@ function renderCands(keepSel){
   if(later(()=>renderCands(true))) return;
   if(!keepSel) sel=0;
   const list=suggest(); const top=list.slice(0,60);
-  $("#candInfo").textContent = `候補 ${list.length}曲`;
+  $("#candInfo").textContent = list.weak?`候補 ${list.length}曲（参考）`:`候補 ${list.length}曲`;
   if(!top.length){ candsHtml=""; $("#cands").innerHTML=`<div class="empty">条件に合う候補がありません。フィルタを緩めるか、この曲を含むプレイリストを読み込んでください。</div>`; return; }
   const max=top[0].sc, lm=labelMap();
-  const html = top.map((c,i)=>{ const t=S.tracks[c.id]; const m=S.meta[c.id]||{};
-    return `<div class="cand${i===sel?" sel":""}" data-i="${i}" data-id="${c.id}"><span class="sc">${Math.round(c.sc/max*100)}</span><img src="${esc(t.img)}" alt="" loading="lazy">
+  const rows = top.map((c,i)=>{ const t=S.tracks[c.id]; const m=S.meta[c.id]||{};
+    return `<div class="cand${i===sel?" sel":""}" data-i="${i}" data-id="${c.id}"><span class="sc">${list.weak?"—":Math.round(c.sc/max*100)}</span><img src="${esc(t.img)}" alt="" loading="lazy">
       <div><div class="nm">${esc(t.name)}</div><div class="muted">${esc(arts(t))}</div>${subLine(c.id,lm)}<div class="chips">${c.chips.map(([k,x])=>`<span class="chip ${k}">${esc(x)}</span>`).join("")}</div></div>
       <span class="meta">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="meta" style="color:var(--accent2)">${m.key||"—"}</span>
       <span class="acts"><button class="sm" data-c="${c.id}" title="曲名をコピー（rekordboxの検索に貼り付け）">⎘</button><button class="sm" data-q="${c.id}">キュー</button><button class="sm" data-p="${c.id}">再生</button><button class="sm" data-n="${c.id}">Nowへ</button></span></div>`; }).join("");
+  const html=(list.weak?`<div class="empty" style="padding:8px 0">今の曲の手がかり（BPM・キー・プレイリスト・音の特徴）が少ないので、参考として並べています。BPM／キーを入れるか、この曲を含むプレイリストを読み込むと精度が上がります。</div>`:"")+rows;
   if(html!==candsHtml){ candsHtml=html; $("#cands").innerHTML=html; }  // 変化がなければ触らない
 }
 function refresh(){ renderDeck(); renderHist(); renderCands(); renderInfo(); }
@@ -661,6 +664,8 @@ function setNow(id, push=true){
   S.now=id; LS.set("now",id); LS.set("hist",S.hist); refresh();
   if(push && S.hist.length) setStatus(`Now：${S.tracks[id].name}（間違えたら ↶ 戻す／U）`);
   if(LS.get("autoRb",true) && rbTodo([id]).length) rbFill([id],true).then(g=>{ if(g){ if(S.now===id) refresh(); autoSync(); } });
+  // BPMが空で、Deezerで取得済みの値があればそれを使う（rekordboxの取り違えを消した後など）
+  if(!S.meta[id]?.bpm && S.dz[id]>0){ S.meta[id]={...(S.meta[id]||{}),bpm:dzB(S.dz[id]),src:S.meta[id]?.src||"deezer"}; DB.set("meta",S.meta); refresh(); }
   if(LS.get("autoInfo",true)) gatherInfo(id);
   else if(!S.meta[id]?.bpm && !(id in S.dz)) deezerBpm(S.tracks[id]).then(b=>{ S.dz[id]=b; if(b){ S.meta[id]={...(S.meta[id]||{}),bpm:b,src:"deezer"}; DB.set("meta",S.meta);} DB.set("dz",S.dz); if(S.now===id) refresh(); }).catch(()=>{});
   if(matchMedia("(max-width:760px)").matches) $("#mobileNow").scrollIntoView({block:"start"});
@@ -710,13 +715,15 @@ function jsonp(url){ return new Promise((res,rej)=>{ const cb="dz"+Math.random()
   window[cb]=d=>{ done(); res(d); };
   s.src=url+(url.includes("?")?"&":"?")+"output=jsonp&callback="+cb; s.onerror=()=>{ done(); rej(new Error("load error")); };
   document.head.appendChild(s); }); }
+// Deezer は倍テンポで返すことがある（例: Get Busy → 200.7）。185超えは半分にする
+const dzB=b=>b>185?Math.round(b/2*10)/10:b;
 async function deezerBpm(t){
   let d=null;
   if(t.isrc){ d=await jsonp("https://api.deezer.com/track/isrc:"+encodeURIComponent(t.isrc)); if(d&&d.error) d=null; }
   if(!d){ const q=`artist:"${(t.artists[0]?.name||"").replace(/"/g,"")}" track:"${t.name.replace(/"/g,"")}"`;
     const sr=await jsonp("https://api.deezer.com/search?limit=1&q="+encodeURIComponent(q));
     const hit=sr&&sr.data&&sr.data[0]; if(hit){ await sleep(120); d=await jsonp("https://api.deezer.com/track/"+hit.id); if(d&&d.error) d=null; } }
-  return d&&d.bpm>0 ? Math.round(d.bpm*10)/10 : 0;
+  return d&&d.bpm>0 ? dzB(Math.round(d.bpm*10)/10) : 0;
 }
 // ---------- ReccoBeats（Spotify曲IDでBPM・キー・audio features。無料・キー不要、1回40曲まで） ----------
 let rbRunning=false;
@@ -869,7 +876,7 @@ async function gatherInfo(id){
       if(!d){ const q=`artist:"${(a0.name||"").replace(/"/g,"")}" track:"${t.name.replace(/"/g,"")}"`; const sr=await jsonp("https://api.deezer.com/search?limit=1&q="+encodeURIComponent(q));
         const hit=sr&&sr.data&&sr.data[0]; if(hit){ await sleep(120); d=await jsonp("https://api.deezer.com/track/"+hit.id); if(d&&d.error) d=null; } }
       if(!d){ e.dz={none:true}; if(!(id in S.dz)){ S.dz[id]=0; DB.set("dz",S.dz); } upd(); return; }
-      const b=d.bpm>0?Math.round(d.bpm*10)/10:0; S.dz[id]=b; DB.set("dz",S.dz);
+      const b=d.bpm>0?dzB(Math.round(d.bpm*10)/10):0; S.dz[id]=b; DB.set("dz",S.dz);
       if(b && !S.meta[id]?.bpm){ S.meta[id]={...(S.meta[id]||{}),bpm:b,src:"deezer"}; DB.set("meta",S.meta); if(S.now===id){ renderDeck(); renderCands(true); } }
       e.dz={bpm:b,gain:d.gain,rank:d.rank,release:d.release_date,explicit:d.explicit_lyrics,link:d.link,title:d.title}; upd();
       if(d.album?.id){ await sleep(120); const al=await jsonp("https://api.deezer.com/album/"+d.album.id); if(al&&!al.error) e.dz.album={title:al.title,label:al.label,genres:(al.genres?.data||[]).map(g=>g.name),release:al.release_date,nb:al.nb_tracks,fans:al.fans,type:al.record_type}; }
