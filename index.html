@@ -603,7 +603,7 @@ function renderDeck(){
   const undo=S.hist.length?`<button class="sm" data-undo title="ひとつ前のNowに戻す（U）">↶ 戻す</button>`:"";
   $("#mobileNow").innerHTML=`<b>NOW</b>${esc(t.name)} <span class="muted">— ${esc(arts(t))}</span><span class="m">${m.bpm?m.bpm.toFixed(1):"—"} ${m.key||""}</span>${undo?" "+undo:""}`;
   $("#deck").innerHTML=`<div class="row"><img src="${esc(t.img)}" alt=""><div><div class="t">${esc(t.name)}</div><div class="a">${esc(arts(t))}</div><div class="muted">${esc(t.album)} ${t.year||""}</div></div></div>
-   <div class="bk"><span class="big">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="muted">BPM</span><span class="big k">${m.key||"—"}</span><span class="muted">${m.genre?esc(m.genre):""} ${m.src?"("+(SRC_LABEL[m.src]||m.src)+(m.kSrc&&m.kSrc!==m.src?" / キー: "+(SRC_LABEL[m.kSrc]||m.kSrc):"")+(m.bSrc&&m.bSrc!==m.src?" / BPM: "+(SRC_LABEL[m.bSrc]||m.bSrc):"")+")":""}</span></div>
+   <div class="bk"><span class="big">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="muted">BPM</span><span class="big k">${m.key||"—"}</span><span class="muted">${m.genre?esc(m.genre):""} ${m.src?"("+(SRC_LABEL[m.src]||m.src)+(m.kSrc&&m.kSrc!==m.src?" / キー: "+(SRC_LABEL[m.kSrc]||m.kSrc):"")+(m.bSrc&&m.bSrc!==m.src?" / BPM: "+(SRC_LABEL[m.bSrc]||m.bSrc):"")+")":""}${m.src==="rekordbox"&&m.rbName&&norm(m.rbName)!==norm(t.name)?` <span class="muted" title="rekordbox のこの曲と照合しました">← rekordbox「${esc(m.rbName)}」</span>`:""}</span></div>
    <div class="bk"><input id="eBpm" placeholder="BPM" value="${m.bpm||""}"><input id="eKey" placeholder="キー 8A/Am" value="${m.key||""}"><button class="sm" id="saveMeta">保存</button><button class="sm" id="tap">TAP</button><button class="sm" data-p="${t.id}" title="Spotifyで再生">▶ 再生</button><button class="sm" data-c="${t.id}" title="曲名をコピー">⎘ コピー</button>${undo}<span class="muted" id="tapv"></span></div>`;
   $("#saveMeta").onclick=()=>{ const bpm=parseFloat($("#eBpm").value)||null; const kRaw=$("#eKey").value.trim(); const key=toCamelot(kRaw);
     if(kRaw && !key){ toast("キーは 8A や Am の形で入力してください"); return; }
@@ -1037,6 +1037,9 @@ const SRC_LABEL={deezer:"Deezer",rekordbox:"rekordbox",exportify:"Exportify",rec
 function mergeMeta(remote){
   let changed=0;
   for(const [id,r] of Object.entries(remote.meta||{})){ const l=S.meta[id]||{};
+    // 取り違えと分かって消した rekordbox の値（rbBad）を、別端末の古い値で戻さない／逆に他端末の取り消しを受け取る
+    if(l.rbBad && r.src==="rekordbox") continue;
+    if(r.rbBad && l.src==="rekordbox"){ S.meta[id]={...(l.af?{af:l.af}:{}),...r}; changed++; continue; }
     const rr=SRC_RANK[r.src]||0, lr=SRC_RANK[l.src]||0; const n={...l};
     if(r.bpm && (!l.bpm || rr>lr)) n.bpm=r.bpm; if(r.key && (!l.key || rr>lr)) n.key=r.key; if(r.genre && (!l.genre || rr>lr)) n.genre=r.genre;
     if(rr>lr || !l.src) n.src=r.src||l.src;
@@ -1088,7 +1091,7 @@ async function importXml(file){
   const rows=[...doc.querySelectorAll("COLLECTION > TRACK")];
   const exact=new Map(), loose=new Map(), base=new Set();
   for(const r of rows){ const name=r.getAttribute("Name"), artist=r.getAttribute("Artist")||"";
-    const v={bpm:parseFloat(r.getAttribute("AverageBpm"))||null,key:toCamelot(r.getAttribute("Tonality")),genre:r.getAttribute("Genre")||""};
+    const v={bpm:parseFloat(r.getAttribute("AverageBpm"))||null,key:toCamelot(r.getAttribute("Tonality")),genre:r.getAttribute("Genre")||"",rbName:name||""};
     for(const a of artist.split(/,|&| feat\.? | ft\.? | x /i).map(x=>x.trim()).filter(Boolean)){
       exact.set(norm(a)+"|"+norm(name),v); const lk=normLoose(a)+"|"+normLoose(name);
       loose.set(lk+"|"+verKey(name),v); base.add(lk); } }
@@ -1100,7 +1103,7 @@ async function importXml(file){
     let wrongVer=false;
     if(!v) for(const a of t.artists){ const lk=normLoose(a.name)+"|"+normLoose(t.name); v=loose.get(lk+"|"+verKey(t.name)); if(v) break; if(base.has(lk)) wrongVer=true; }
     // 以前の取り込みで別の版と取り違えていた値は消して、ReccoBeats／Deezer に取り直させる
-    if(!v && wrongVer && S.meta[t.id]?.src==="rekordbox"){ const {af}=S.meta[t.id]; S.meta[t.id]=af?{af}:{}; delete S.rb[t.id]; fixed++; continue; }
+    if(!v && wrongVer && S.meta[t.id]?.src==="rekordbox"){ const {af}=S.meta[t.id]; S.meta[t.id]={...(af?{af}:{}),rbBad:1}; delete S.rb[t.id]; fixed++; continue; }
     if(v){ const cur=S.meta[t.id]||{}; const n={...v,src:"rekordbox"};
       if(!n.key && cur.key){ n.key=cur.key; n.kSrc=cur.kSrc||cur.src; } if(!n.bpm && cur.bpm){ n.bpm=cur.bpm; n.bSrc=cur.bSrc||cur.src; } if(!n.genre && cur.genre) n.genre=cur.genre; if(cur.af) n.af=cur.af;
       S.meta[t.id]=n; hit++; }
