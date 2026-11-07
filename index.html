@@ -801,16 +801,25 @@ async function discogsInfo(id){
   return v;
 }
 // ---------- 曲情報の自動収集 ----------
-const EX_TTL=1000*60*60*24*14;
+const EX_TTL=1000*60*60*24*14, EX_VER=2; // 2: サンプリング情報＋Wikipediaの転送先チェック
 const fmtDur=ms=>ms?`${Math.floor(ms/60000)}:${String(Math.floor(ms%60000/1000)).padStart(2,"0")}`:"";
 const fmtN=n=>n>=1e6?(n/1e6).toFixed(1)+"M":n>=1e3?(n/1e3).toFixed(n>=1e4?0:1)+"k":String(n);
 function saveEx(){ const ks=Object.keys(S.ex); if(ks.length>400){ ks.sort((a,b)=>(S.ex[a].at||0)-(S.ex[b].at||0)); for(const k of ks.slice(0,ks.length-400)) delete S.ex[k]; } DB.set("ex",S.ex); }
+// MusicBrainz の関係（サンプリング・リミックス・カバー）
+function mbLinks(rels){
+  const one=x=>({t:x.title||"",a:(x["artist-credit"]||[]).map(c=>(c.name||c.artist?.name||"")+(c.joinphrase||"")).join(""),id:x.id||""});
+  const pick=(type,dir)=>rels.filter(r=>r.type===type&&r.direction===dir&&r.recording).map(r=>one(r.recording));
+  return { smp:[...pick("samples material","forward"),...pick("mashes up","forward")].slice(0,10),
+    smpBy:pick("samples material","backward").slice(0,10),
+    rmxOf:pick("remix","forward").slice(0,5),
+    cover:rels.filter(r=>r.type==="performance"&&r.work&&(r.attributes||[]).includes("cover")).map(r=>({t:r.work.title,id:r.work.id})).slice(0,3) };
+}
 async function gatherInfo(id){
   const t=S.tracks[id]; if(!t) return;
   const old=S.ex[id];
-  if(old && old.done && Date.now()-old.at<EX_TTL){ if(S.dg[id]?.rid && !S.dg[id].rel) discogsRelease(id); return; }
+  if(old && old.done && old.v===EX_VER && Date.now()-old.at<EX_TTL){ if(S.dg[id]?.rid && !S.dg[id].rel) discogsRelease(id); return; }
   if(old && old.running) return;
-  const e=S.ex[id]={at:Date.now(),done:false,running:true};
+  const e=S.ex[id]={at:Date.now(),done:false,running:true,v:EX_VER};
   const upd=()=>{ if(S.now===id) renderInfo(); };
   const a0=t.artists[0]||{};
   const jobs=[];
@@ -850,16 +859,24 @@ async function gatherInfo(id){
   })());
   // MusicBrainz: タグ・初リリース・収録リリース
   jobs.push((async()=>{
-    try{ let r=null; const mbf=async u=>{ const x=await fetch(u,{headers:{Accept:"application/json"}}); return x.ok?x.json():null; };
-      if(t.isrc){ const j=await mbf(`https://musicbrainz.org/ws/2/isrc/${encodeURIComponent(t.isrc)}?fmt=json&inc=releases+tags+genres+artist-credits`); r=j?.recordings?.[0]||null; }
-      if(!r){ const q=`recording:"${cleanTitle(t.name).replace(/"/g,"")}" AND artist:"${(a0.name||"").replace(/"/g,"")}"`; const j=await mbf(`https://musicbrainz.org/ws/2/recording?fmt=json&limit=3&query=${encodeURIComponent(q)}`);
-        r=(j?.recordings||[]).find(x=>x.score>=85)||null;
-        if(r){ await sleep(1100); const full=await mbf(`https://musicbrainz.org/ws/2/recording/${r.id}?fmt=json&inc=releases+tags+genres+artist-credits`); if(full) r={...r,...full}; } }
-      if(!r){ e.mb={none:true}; upd(); return; }
+    try{ let r=null, cs=[]; const mbf=async u=>{ const x=await fetch(u,{headers:{Accept:"application/json"}}); return x.ok?x.json():null; };
+      if(t.isrc){ const j=await mbf(`https://musicbrainz.org/ws/2/isrc/${encodeURIComponent(t.isrc)}?fmt=json&inc=artist-credits`); cs=(j?.recordings||[]).slice(0,3); }
+      if(!cs.length){ const q=`recording:"${cleanTitle(t.name).replace(/"/g,"")}" AND artist:"${(a0.name||"").replace(/"/g,"")}"`; const j=await mbf(`https://musicbrainz.org/ws/2/recording?fmt=json&limit=25&query=${encodeURIComponent(q)}`);
+        // DJミックス内の録音は除き、収録リリースが多い（＝元の録音らしい）順、長さが近い順
+        const me=normLoose(t.name), rk=x=>(x.releases||[]).length*1e6-Math.abs((x.length||0)-(t.dur||0))/1000;
+        cs=(j?.recordings||[]).filter(x=>x.score>=85 && normLoose(x.title)===me && !/mix/i.test(x.disambiguation||"")).sort((x,y)=>rk(y)-rk(x)).slice(0,4); }
+      if(!cs.length){ e.mb={none:true}; upd(); return; }
+      // サンプリング等の関係は録音ごとに登録されるので、同じ曲の録音を数件まとめて見る（1件/秒）
+      const allRels=[];
+      for(let i=0;i<cs.length;i++){ await sleep(1100);
+        const full=await mbf(`https://musicbrainz.org/ws/2/recording/${cs[i].id}?fmt=json&inc=${i?"":"releases+tags+genres+"}artist-credits+recording-rels+work-rels`);
+        if(!full) continue; if(!r) r={...cs[i],...full}; allRels.push(...(full.relations||[])); }
+      if(!r){ e.mb={err:1}; upd(); return; }
+      r.relations=allRels.filter((x,i,a)=>a.findIndex(y=>y.type===x.type&&y.direction===x.direction&&(y.recording||y.work)?.id===(x.recording||x.work)?.id)===i);
       const tags=[...(r.genres||[]),...(r.tags||[])].sort((a,b)=>(b.count||0)-(a.count||0)).map(x=>x.name);
       const rels=r.releases||[];
       e.mb={id:r.id,tags:[...new Set(tags)].slice(0,8),first:r["first-release-date"]||"",nRel:rels.length,relTitles:[...new Set(rels.map(x=>x.title))].slice(0,5),length:r.length||0,
-        credit:(r["artist-credit"]||[]).map(c=>(c.name||c.artist?.name||"")+(c.joinphrase||"")).join("")}; upd();
+        credit:(r["artist-credit"]||[]).map(c=>(c.name||c.artist?.name||"")+(c.joinphrase||"")).join(""),...mbLinks(r.relations||[])}; upd();
     }catch{ e.mb={err:1}; upd(); }
   })());
   // Wikipedia: アーティスト概要
@@ -869,6 +886,7 @@ async function gatherInfo(id){
     const tries=[["ja",name],["en",name],["en",name+" (musician)"],["en",name+" (band)"],["en",name+" (DJ)"],["ja",name+" (ミュージシャン)"]];
     for(const [lang,title] of tries){ try{ const r=await fetch(`https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g,"_"))}`); if(!r.ok) continue; const j=await r.json();
         if(j.type!=="standard"||!KW.test((j.extract||"")+(j.description||""))) continue;
+        if(normLoose(j.title)!==normLoose(name)) continue; // 「Madison Mars」→「Don't Go (Yazoo song)」のような別ページへの転送は採らない
         e.wk={lang,title:j.title,extract:(j.extract||"").slice(0,320),url:j.content_urls?.desktop?.page||"",desc:j.description||""}; upd(); return; }catch{} }
     e.wk=null; upd();
   })());
@@ -931,6 +949,12 @@ function renderInfo(){
   h+=sec("MusicBrainz", ex.mb, ex.mb?.id?"https://musicbrainz.org/recording/"+ex.mb.id:"", b=>{ let s="";
     if(b.first) s+=li("1ST",`${esc(b.first)} <span class="muted">初リリース</span>`);
     if(b.nRel) s+=li("REL",`${b.nRel}リリースに収録 <span class="muted">${esc(b.relTitles.join(" / "))}</span>`);
+    const rl=(xs,kind)=>xs.map(x=>`<a href="https://musicbrainz.org/${kind}/${esc(x.id)}" target="_blank" rel="noopener" style="color:inherit">${esc(x.t)}</a>${x.a?` <span class="muted">– ${esc(x.a)}</span>`:""}`).join("<br>");
+    if(b.smp?.length) s+=li("SMP",`<span class="muted">ネタ（サンプリング元）</span><br>${rl(b.smp,"recording")}`);
+    if(b.smpBy?.length) s+=li("SMP",`<span class="muted">この曲をサンプリングした曲</span><br>${rl(b.smpBy,"recording")}`);
+    if(b.rmxOf?.length) s+=li("RMX",`<span class="muted">リミックス元</span><br>${rl(b.rmxOf,"recording")}`);
+    if(b.cover?.length) s+=li("CVR",`<span class="muted">カバー（原曲）</span><br>${rl(b.cover,"work")}`);
+    if(b.id && !b.smp?.length && !b.smpBy?.length) s+=li("SMP",`<span class="muted">MusicBrainz にサンプリングの登録なし</span>`);
     s+=chips(b.tags); return s; });
   // Discogs
   const d=S.dg[id];

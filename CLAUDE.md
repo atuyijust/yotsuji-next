@@ -43,7 +43,7 @@ DJ中に「次の曲」を自分のSpotifyライブラリから提案するブ�
 - af（energy等）は ReccoBeats／Exportify 由来。無い曲は雰囲気・エネルギーの加点なし
 
 ## 曲情報の自動収集（`gatherInfo(id)` → `S.ex[id]`, IndexedDB "ex", 14日キャッシュ）
-Spotify（人気度・レーベル・リリース・アーティストのジャンル／フォロワー・トップ曲・別バージョン検索）／Deezer（BPM・ゲイン・ランク・アルバム）／MusicBrainz（ISRC→recording、タグ・初リリース、1req/秒）／Wikipedia REST summary（ja→en、音楽系記事のみ採用）／Discogs。
+Spotify（人気度・レーベル・リリース・アーティストのジャンル／フォロワー・トップ曲・別バージョン検索）／Deezer（BPM・ゲイン・ランク・アルバム）／MusicBrainz（ISRC→recording、タグ・初リリース、1req/秒。`mbLinks()` でサンプリング元／この曲をサンプリングした曲／リミックス元／カバー。関係は録音ごとに登録されるので、DJミックス内の録音を除き収録リリースの多い順に最大4録音を見て合算）／Wikipedia REST summary（ja→en、音楽系記事のみ、かつ返ってきた記事名がアーティスト名と一致するときだけ採用＝別ページへの転送を弾く）／Discogs。キャッシュは `EX_VER` が変わると取り直す。WhoSampled は公開APIがないので使わない。
 いずれも **APIキー不要** のものだけ。鍵が要るサービス（Last.fm等）はコードに鍵を埋め込まない方針。
 表示は `renderInfo()`（#infoBody）。チェックボックス `#autoInfo` でON/OFF。
 
