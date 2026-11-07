@@ -59,10 +59,15 @@
   .sl span:last-child{font-family:var(--mono);color:var(--dim);text-align:right}
   .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
   .more{text-align:center;padding:12px 0 20px} .more button{padding:6px 18px}
+  #toTop{position:fixed;left:calc(var(--side,340px) + 24px);bottom:22px;z-index:40;padding:8px 14px;border-radius:20px;border:0;background:var(--accent);color:#08110e;font-weight:600;font-size:13px;
+    box-shadow:0 4px 16px rgba(0,0,0,.45);cursor:pointer;opacity:0;transform:translateY(8px);pointer-events:none;transition:opacity .15s,transform .15s}
+  #toTop.on{opacity:1;transform:none;pointer-events:auto}
+  @media (max-width:760px){ #toTop{left:auto;right:14px;bottom:16px} }
   .cand .sub{font:11px var(--mono);color:var(--dim);margin-top:1px}
   .cand .sub .gen{color:var(--accent2)} .cand .sub .af{cursor:help}
-  .gp{display:inline-block;font:600 11px/1.5 system-ui,sans-serif;padding:0 7px;border-radius:9px;margin-left:6px;vertical-align:2px;white-space:nowrap;
+  .gp{display:inline-block;font:600 11px/1.5 system-ui,sans-serif;padding:0 7px;border-radius:9px;margin-left:5px;vertical-align:2px;white-space:nowrap;
     color:hsl(var(--h) 70% 72%);background:hsl(var(--h) 45% 20% / .55);border:1px solid hsl(var(--h) 45% 38%)}
+  .gj{font-size:11px;margin-left:6px;vertical-align:2px} .gj.g{color:var(--accent)} .gj.y{color:var(--accent2)} .gj.r{color:var(--warn)}
   .gp.none{--h:0;color:var(--dim);background:none;border-color:var(--line);font-weight:400}
   .deck .gps{margin-top:4px} .deck .gps .gp{margin:0 4px 0 0;font-size:12px}
   .cand{display:grid;grid-template-columns:34px 44px 1fr 70px 52px auto;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid var(--line)}
@@ -216,6 +221,7 @@
       <span class="muted" id="candInfo"></span>
       <span class="keys"><b>↑↓</b> 選択 <b>Enter</b> Nowへ <b>/</b> 検索 <b>C</b> 曲名コピー <b>U</b> 取り消し <b>T</b> タグ <b>M</b> 選び方</span>
     </div>
+    <button id="toTop" title="候補の先頭へ（Home）" aria-label="候補の先頭へ">↑ 先頭へ</button>
     <div id="cands"><div class="empty">ライブラリを読み込み、Now Playingを決めると候補が並びます。</div></div>
   </section>
 </main>
@@ -599,11 +605,11 @@ function suggest(){
     if(kc){ if(fK && kc.s<.5) continue; sc+=W.key*kc.s; chips.push([kc.s>=.85?"g":kc.s>=.4?"y":"r", `${keyOf(id)} ${kc.t}`]); }
     else if(fK && curKey) continue;
     // ジャンル: 曲のジャンル＋アーティストのSpotifyジャンルで比べる。両方分かっていて全く重ならなければ減点
-    const gSet=genreSet(id,lm), gs=genreSim(vctx.curG,gSet);
+    const gSet=genreSet(id,lm), gs=genreSim(vctx.curG,gSet); let gst=null;
     // ジャンル越え: ジャンルが違う（両方分かっている）ほど加点、同じジャンルは加点なし。音の感じが近いほど加点
-    if(W.cross && gs!=null){ const v=gs===0?1:gs<.5?.5:0; sc+=W.cross*v; if(v) chips.push([v===1?"g":"y",`ジャンル越え（${cut([...vctx.curG][0]||"",14)} → ${cut([...gSet][0]||"",14)}）`]); }
+    if(W.cross && gs!=null){ const v=gs===0?1:gs<.5?.5:0; sc+=W.cross*v; if(v) gst=[v===1?"g":"y","ジャンル越え"]; }
     if(W.snd){ const sd=afSim(curAf,afOf(id),vctx.st); if(sd!=null){ sc+=W.snd*(sd-.4)*2; if(sd>=.55) chips.push([sd>=.7?"g":"y",`音の感じ ${Math.round(sd*100)}%`]); } }
-    if(gs!=null && W.gen){ if(gs>0){ sc+=W.gen*gs; chips.push([gs>=1?"g":"y", genreHit(vctx.curG,gSet)]); } else { sc-=W.gen*2; chips.push(["r","ジャンル違い"]); } }
+    if(gs!=null && W.gen){ if(gs>0){ sc+=W.gen*gs; if(!gst) gst=[gs>=1?"g":"y", gs>=1?"同じジャンル":"近いジャンル"]; } else { sc-=W.gen*2; if(!gst) gst=["r","ジャンル違い"]; } }
     const af=afOf(id);
     if(W.af){ const vb=vibe(cur,id,vctx); if(vb){ sc+=W.af*(vb.v-.4)*2; if(W.af>=1 && vb.v>=.55) chips.push([vb.v>=.7?"g":"y",`雰囲気 ${Math.round(vb.v*100)}%${vb.why.length?"（"+vb.why.join("・")+"）":""}`]); } }
     if(W.eng && curAf?.en!=null && af?.en!=null){
@@ -615,8 +621,8 @@ function suggest(){
     if(W.rnd) sc+=W.rnd*rnd01(seed+id);
     if(sameArt){ sc+=0.3; chips.push(["y","同アーティスト"]); }
     if(tg.length){ const sh=tg.filter(x=>curTags.includes(x)); sc+=TAG_W*Math.min(2,sh.length); for(const x of tg) chips.push(["tag"+(sh.includes(x)?" g":""),"#"+x]); }
-    if(sc<=0){ weak.push({id,sc,chips}); continue; }
-    res.push({id,sc,chips});
+    if(sc<=0){ weak.push({id,sc,chips,gst}); continue; }
+    res.push({id,sc,chips,gst});
   }
   for(const r of [...res,...weak]) r.pct=Math.max(0,Math.min(100,Math.round(r.sc/ideal*100)));
   res.sort((a,b)=>b.sc-a.sc);
@@ -674,7 +680,6 @@ function labelOf(id,lm){ const e=S.ex[id], t=S.tracks[id];
 const cut=(x,n)=>x.length>n?x.slice(0,n-1)+"…":x;
 function subLine(id,lm){ const t=S.tracks[id], a=S.meta[id]?.af; const p=[], q=[];
   if(t.dur) p.push(fmtDur(t.dur)); if(t.year) p.push(t.year); if(t.pop!=null) p.push("POP "+t.pop); const l=labelOf(id,lm); if(l) p.push(esc(cut(l,28)));
-  const gl=genreList(id,lm); if(gl.length>1) q.push(`<span class="gen">${esc(cut(gl.slice(1,3).join(" / "),32))}</span>`);
   if(a && (a.en!=null||a.da!=null||a.va!=null)){ const f=v=>v==null?"–":Math.round(v*100);
     q.push(`<span class="af" title="エネルギー / ダンス度 / 明るさ（0〜100）">E${f(a.en)} D${f(a.da)} V${f(a.va)}</span>`); }
   return (p.length?`<div class="sub">${p.join(" · ")}</div>`:"")+(q.length?`<div class="sub">${q.join(" · ")}</div>`:""); }
@@ -697,7 +702,7 @@ function renderCands(keepSel){
   const max=top[0].sc, lm=labelMap();
   const rows = top.map((c,i)=>{ const t=S.tracks[c.id]; const m=S.meta[c.id]||{};
     return `<div class="cand${i===sel?" sel":""}" data-i="${i}" data-id="${c.id}"><span class="sc" title="全部の条件が揃ったときを100とした点">${list.weak?"—":c.pct}</span><img src="${esc(t.img)}" alt="" loading="lazy">
-      <div><div class="nm">${esc(t.name)}${(()=>{ const gl=genreList(c.id,lm); return gl.length?genrePill(gl[0]):`<span class="gp none" title="ジャンル不明">？</span>`; })()}</div><div class="muted">${esc(arts(t))}</div>${subLine(c.id,lm)}<div class="chips">${c.chips.map(([k,x])=>`<span class="chip ${k}">${esc(x)}</span>`).join("")}</div></div>
+      <div><div class="nm">${esc(t.name)}${(()=>{ const gl=genreList(c.id,lm); return (gl.length?gl.slice(0,3).map(x=>genrePill(x)).join(""):`<span class="gp none" title="ジャンル不明">？</span>`)+(c.gst?`<span class="gj ${c.gst[0]}">${c.gst[1]}</span>`:""); })()}</div><div class="muted">${esc(arts(t))}</div>${subLine(c.id,lm)}<div class="chips">${c.chips.map(([k,x])=>`<span class="chip ${k}">${esc(x)}</span>`).join("")}</div></div>
       <span class="meta">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="meta" style="color:var(--accent2)">${m.key||"—"}</span>
       <span class="acts"><button class="sm" data-c="${c.id}" title="曲名をコピー（rekordboxの検索に貼り付け）">⎘</button><button class="sm" data-q="${c.id}">キュー</button><button class="sm" data-p="${c.id}">再生</button><button class="sm" data-n="${c.id}">Nowへ</button></span></div>`; }).join("");
   let html=(list.weak?`<div class="empty" style="padding:8px 0">今の曲の手がかり（BPM・キー・プレイリスト・音の特徴）が少ないので、参考として並べています。BPM／キーを入れるか、この曲を含むプレイリストを読み込むと精度が上がります。</div>`:"")+rows;
@@ -1283,6 +1288,7 @@ document.addEventListener("keydown",e=>{
   }
   if(typing) return;
   if(e.key==="/"){ e.preventDefault(); $("#q").focus(); }
+  else if(e.key==="Home"){ e.preventDefault(); toTop(); }
   else if((e.key==="t"||e.key==="T") && $("#tagIn")){ e.preventDefault(); $("#tagIn").focus(); }
   else if(e.key==="ArrowDown"||e.key==="j"){ e.preventDefault(); moveSel(1); }
   else if(e.key==="ArrowUp"||e.key==="k"){ e.preventDefault(); moveSel(-1); }
@@ -1299,6 +1305,11 @@ $("#djMode").onchange=e=>setDj(e.target.checked);
 
 // ---------- UI配線 ----------
 function openLib(){ $("#redir").textContent=REDIRECT; $("#cid").value=LS.get("cid",""); $("#ghTok").value=LS.get("ghTok","")?"••••••••":""; $("#ghTok").placeholder=LS.get("ghTok","")?"保存済み（変えるときだけ入力）":"github_pat_…"; $("#incSaved").checked=LS.get("incSaved",false); renderPlList(); $("#dlgLib").showModal(); }
+// 候補の先頭へ戻るボタン（パソコンは右側の欄、スマホはページ全体がスクロールするので両方見る）
+function toTopCheck(){ const r=$("#cands").getBoundingClientRect(); $("#toTop").classList.toggle("on", r.top < -300); }
+function toTop(){ sel=0; $(".filters").scrollIntoView({behavior:"smooth",block:"start"}); $$("#cands .cand").forEach((x,i)=>x.classList.toggle("sel",i===0)); }
+$("section.list").addEventListener("scroll",toTopCheck,{passive:true}); window.addEventListener("scroll",toTopCheck,{passive:true});
+$("#toTop").onclick=toTop;
 document.addEventListener("click",e=>{
   if(e.target.closest("[data-undo]")){ undoNow(); return; }
   if(e.target.closest("#moreCands")){ candLimit+=60; renderCands(true); return; }

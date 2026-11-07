@@ -33,8 +33,8 @@ DJ中に「次の曲」を自分のSpotifyライブラリから提案するブ�
 
 ## 曲データ（`slimTrack`）
 `{id, uri, name, artists, album, albumId, dur, isrc, img, pop, year}`。`pop` は Spotify人気度（TRACK_VER=2 で追加。LS `trackVer` が古いと次の読み込みで全PLを一度だけ読み直す）。
-ジャンルは曲名の横に系統ごとに色分けしたラベル（`genrePill`、色は `GENRE_FAM` の系統 → `FAM_HUE`、不明は「？」）。デッキにも最大4つ。ジャンルの並び `genreList()` = meta.genre → アーティストのSpotifyジャンル。アーティストのジャンルは `agFill()` が全アーティスト分を `/artists?ids=`（50件ずつ）でまとめて取得し `S.ag[artistId]={g,at}`（IndexedDB "ag"、30日、空も記録）。起動時と `autoMeta` で自動。`labelMap().__ag` に合流するので genreSet/genreSim も同じデータを使う。
-候補行の下 `subLine()`: 1行目 長さ・年・POP・レーベル、2行目 2つ目以降のジャンル・AF（E/D/V＝energy/danceability/valence×100）。レーベルは通信せず、集めた曲情報（`S.ex`）→ 同じアルバムの曲の情報（`labelMap`）→ Exportify → Discogs の順で分かるものだけ。
+ジャンルの情報は候補では曲名の横の1か所だけに出す（ユーザー指定）: 最大3つのラベル＋判定（同じジャンル／近いジャンル／ジャンル違い／ジャンル越え＝`c.gst`、チップには出さない）。ラベルは系統ごとに色分け（`genrePill`、色は `GENRE_FAM` の系統 → `FAM_HUE`、不明は「？」）。デッキにも最大4つ。ジャンルの並び `genreList()` = meta.genre → アーティストのSpotifyジャンル。アーティストのジャンルは `agFill()` が全アーティスト分を `/artists?ids=`（50件ずつ）でまとめて取得し `S.ag[artistId]={g,at}`（IndexedDB "ag"、30日、空も記録）。起動時と `autoMeta` で自動。`labelMap().__ag` に合流するので genreSet/genreSim も同じデータを使う。
+候補行の下 `subLine()`: 1行目 長さ・年・POP・レーベル、2行目 AF（E/D/V＝energy/danceability/valence×100）。レーベルは通信せず、集めた曲情報（`S.ex`）→ 同じアルバムの曲の情報（`labelMap`）→ Exportify → Discogs の順で分かるものだけ。
 
 ## スコアリング（`suggest()`）
 重み: wFlow（自分のプレイリスト内で直前／直後に並べた曲）、wCo（同じプレイリストに共起、1/log2(len+2)で重み付け）、wBpm（±2/4/6/8%、倍／半分テンポ可）、wKey（Camelot相性 `keyCompat`）、wGen（ジャンル: `genreSet`（meta.genre＋アーティストのSpotifyジャンル）同士を `genreSim` で比較。完全一致1・単語一致0.5・大きな括り `GENRE_FAM`（metal系・house系…）一致0.4。両方分かっていて全く重ならなければ −wGen×2 と「ジャンル違い」チップ）。候補の点数は1位=100ではなく、全条件満点の合計 `ideal` を100とした `pct`（BPMとキーだけ合う曲が100に見えないように）。
@@ -67,6 +67,7 @@ Spotify（人気度・レーベル・リリース・アーティストのジャ�
 - 左右の仕切り `#split`: ドラッグ／←→キーで左ペイン幅（CSS変数 `--side`、240px〜画面幅−380px）。LS `sideW` に保存、ダブルクリックで340pxに戻す。モバイルでは非表示
 - Nowの取り消し: デッキ／モバイルバーの「↶ 戻す」（`data-undo`）とUキー → `undoNow()`
 - 候補は上位60曲ずつ（`candLimit`）。一番下の「もっと見る」で+60。Now・選び方・絞り込みが変わったときだけ60に戻す（`candCtx`）
+- 候補の先頭へ: 下へスクロールすると左下（候補欄の左端、Nowへボタンと重ならない位置。スマホは右下）に「↑ 先頭へ」が浮かぶ（`#toTop`、`toTopCheck`）。Homeキーでも。選択も先頭に戻す
 - 押している最中は描き直さない: `pressing`/`later(fn)`。renderCands・renderDeck・renderInfo は押下中なら離した後に回す（押した要素が差し替わるとクリックが消え「2回押さないと効かない」になるため）。renderCands は HTML が同じなら書き換えない
 - 再生／キュー（`play`/`queue` → `withDevice`）: 404（動いているデバイスなし）なら `/me/player/devices` から開いているSpotify（アクティブ→Computer→Smartphone）を選んで `device_id` 付きで再送。403＝Premiumのみ等は `playErr` で日本語の理由を出す。NOW PLAYING（デッキ）にも ▶ 再生。指示が通っても Mac の Spotify アプリが曲を読み込まず「無」になることがあるので、`confirmPlay` で `/me/player` の曲を確認 → 違えばアルバム文脈（`context_uri`+`offset`）で再送 → それでもだめなら `spotify:track:` リンクでアプリに曲を開く。`toast()` は画面下にも浮かせて出す（#status だけだと押しても反応がないように見えた）
 - DJモード（`setDj`）: 再生／キューボタンを隠し追従を止める
