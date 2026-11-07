@@ -59,11 +59,12 @@
   .sl span:last-child{font-family:var(--mono);color:var(--dim);text-align:right}
   .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
   .more{text-align:center;padding:12px 0 20px} .more button{padding:6px 18px}
-  #toTop{position:fixed;left:calc(var(--side,340px) + 24px);bottom:22px;z-index:40;padding:8px 14px;border-radius:20px;border:0;background:var(--accent);color:#08110e;font-weight:600;font-size:13px;
+  #toTop{position:fixed;right:22px;bottom:22px;z-index:40;padding:8px 14px;border-radius:20px;border:0;background:var(--accent);color:#08110e;font-weight:600;font-size:13px;
     box-shadow:0 4px 16px rgba(0,0,0,.45);cursor:pointer;opacity:0;transform:translateY(8px);pointer-events:none;transition:opacity .15s,transform .15s}
   #toTop.on{opacity:1;transform:none;pointer-events:auto}
-  @media (max-width:760px){ #toTop{left:auto;right:14px;bottom:16px} }
+  @media (max-width:760px){ #toTop{right:14px;bottom:16px} }
   .cand .sub{font:11px var(--mono);color:var(--dim);margin-top:1px}
+  .cand .sub .yr.g{color:var(--accent);font-weight:600} .cand .sub .yr.y{color:var(--accent2)}
   .cand .sub .gen{color:var(--accent2)} .cand .sub .af{cursor:help}
   .gp{display:inline-block;font:600 11px/1.5 system-ui,sans-serif;padding:0 7px;border-radius:9px;margin-left:5px;vertical-align:2px;white-space:nowrap;
     color:hsl(var(--h) 70% 72%);background:hsl(var(--h) 45% 20% / .55);border:1px solid hsl(var(--h) 45% 38%)}
@@ -195,6 +196,7 @@
     <div class="sl"><span>BPM</span><input type="range" min="0" max="5" step="0.5" id="wBpm" value="2"><span></span></div>
     <div class="sl"><span>キー</span><input type="range" min="0" max="5" step="0.5" id="wKey" value="1.5"><span></span></div>
     <div class="sl"><span>ジャンル</span><input type="range" min="0" max="5" step="0.5" id="wGen" value="1"><span></span></div>
+    <div class="sl" title="リリース年が近い曲を加点（同じ年〜±2年が満点、10年以上離れると加点なし）"><span>年代</span><input type="range" min="0" max="5" step="0.5" id="wYear" value="1"><span></span></div>
     </details>
 
     <details class="side" id="dHist" open><summary><h2>セット履歴</h2></summary>
@@ -526,6 +528,8 @@ const MODES={
   down:    {label:"落とす",       tip:"今よりエネルギーが少し低い曲",                              m:{flow:.5,  co:.5,  bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0,  pop:0, eng:3}},
 };
 const afOf=id=>S.meta[id]?.af||null;
+// リリース年: 集めた曲情報の初リリース（MusicBrainz）があれば優先（ベスト盤・再発のアルバム年に引っぱられないように）→ アルバムの年
+const yearOf=id=>{ const f=S.ex[id]?.mb?.first; return (f&&+f.slice(0,4))||S.tracks[id]?.year||null; };
 // 「雰囲気が近い」: 音の特徴（自分のライブラリ内での散らばりで割った距離）＋ジャンルの重なり（同じPLかどうかは含めない＝wCoで別に加点）
 const AF_W={en:1.5,da:1.2,va:1,ac:.8,ins:.8,sp:.6,lo:.5};
 function afStats(){ const st={};
@@ -577,16 +581,17 @@ function suggest(){
   const curBpm=bpmOf(cur), curKey=keyOf(cur), curGen=genOf(cur), curArt=new Set(S.tracks[cur]?.artists.map(a=>a.id)), curAf=afOf(cur);
   const lm=labelMap(), vctx={curAf, st:(M.af||M.snd)?afStats():{}, lm, curG:genreSet(cur,lm)};
   const fB=+$("#fBpm").value, fK=$("#fKey").checked, fA=$("#fArtist").checked, half=$("#fHalf").checked;
-  const W={flow:w("wFlow")*M.flow,co:w("wCo")*M.co,bpm:w("wBpm")*M.bpm,key:w("wKey")*M.key,gen:w("wGen")*M.gen,af:M.af,nov:M.nov,rnd:M.rnd,pop:M.pop,eng:M.eng,cross:M.cross||0,snd:M.snd||0};
+  const W={flow:w("wFlow")*M.flow,co:w("wCo")*M.co,bpm:w("wBpm")*M.bpm,key:w("wKey")*M.key,gen:w("wGen")*M.gen,year:w("wYear")*(M.year??1),af:M.af,nov:M.nov,rnd:M.rnd,pop:M.pop,eng:M.eng,cross:M.cross||0,snd:M.snd||0};
   const seed=cur+":"+(S.seed||0);
   // 点数の表示用: 全部の条件が満点のときの合計（1位を100にすると、BPMとキーが合うだけの曲も100に見えてしまうため）
   const curTags=tagsOf(cur), fTag=LS.get("fTag",""), TAG_W=1.5;  // 今の曲と同じタグ1つにつき +1.5（2つまで）
-  const ideal=Math.max(1, [W.flow,W.co,W.bpm,W.key,W.gen].reduce((x,v)=>x+Math.max(0,v),0)+(W.af>0?W.af*1.2:0)+W.nov+W.rnd+W.pop*.6+W.eng+W.cross+W.snd*1.2+(curTags.length?TAG_W*Math.min(2,curTags.length):0));
+  const curYear=yearOf(cur);
+  const ideal=Math.max(1, [W.flow,W.co,W.bpm,W.key,W.gen,W.year].reduce((x,v)=>x+Math.max(0,v),0)+(W.af>0?W.af*1.2:0)+W.nov+W.rnd+W.pop*.6+W.eng+W.cross+W.snd*1.2+(curTags.length?TAG_W*Math.min(2,curTags.length):0));
   const pool = new Set([...Object.keys(S.occ), ...S.saved]);
   const res=[], weak=[];
   for(const id of pool){
     if(played.has(id)) continue; const t=S.tracks[id]; if(!t) continue;
-    const tg=tagsOf(id); if(fTag && !tg.includes(fTag)) continue;
+    const tg=tagsOf(id); if(fTag && !tg.includes(fTag)) continue; let yv=null;
     const sameArt = t.artists.some(a=>curArt.has(a.id));
     if(fA && sameArt) continue;
     const chips=[]; let sc=0;
@@ -619,10 +624,12 @@ function suggest(){
     }
     if(W.pop && t.pop!=null){ sc+=W.pop*(1-t.pop/100)*.6; if(t.pop<30) chips.push(["y","隠れた曲"]); }
     if(W.rnd) sc+=W.rnd*rnd01(seed+id);
+    // リリース年の近さ: 同じ年〜±2年=1、±5年=.6、±10年=.25、それより離れると0
+    if(W.year && curYear){ const y=yearOf(id); if(y){ const d=Math.abs(y-curYear), v=d<=2?1:d<=5?.6:d<=10?.25:0; if(v){ sc+=W.year*v; yv=[v>=1?"g":"y", d===0?"今の曲と同じ年":`今の曲と${d}年差`]; } } }
     if(sameArt){ sc+=0.3; chips.push(["y","同アーティスト"]); }
     if(tg.length){ const sh=tg.filter(x=>curTags.includes(x)); sc+=TAG_W*Math.min(2,sh.length); for(const x of tg) chips.push(["tag"+(sh.includes(x)?" g":""),"#"+x]); }
-    if(sc<=0){ weak.push({id,sc,chips,gst}); continue; }
-    res.push({id,sc,chips,gst});
+    if(sc<=0){ weak.push({id,sc,chips,gst,yv}); continue; }
+    res.push({id,sc,chips,gst,yv});
   }
   for(const r of [...res,...weak]) r.pct=Math.max(0,Math.min(100,Math.round(r.sc/ideal*100)));
   res.sort((a,b)=>b.sc-a.sc);
@@ -678,8 +685,8 @@ function genreText(id,lm){ const g=S.meta[id]?.genre; if(g) return g;
 function labelOf(id,lm){ const e=S.ex[id], t=S.tracks[id];
   return e?.sp?.label || e?.dz?.album?.label || (t?.albumId&&lm[t.albumId]) || S.meta[id]?.af?.lbl || S.dg[id]?.label?.[0] || ""; }
 const cut=(x,n)=>x.length>n?x.slice(0,n-1)+"…":x;
-function subLine(id,lm){ const t=S.tracks[id], a=S.meta[id]?.af; const p=[], q=[];
-  if(t.dur) p.push(fmtDur(t.dur)); if(t.year) p.push(t.year); if(t.pop!=null) p.push("POP "+t.pop); const l=labelOf(id,lm); if(l) p.push(esc(cut(l,28)));
+function subLine(id,lm,yv){ const t=S.tracks[id], a=S.meta[id]?.af; const p=[], q=[];
+  const yr=yearOf(id); if(t.dur) p.push(fmtDur(t.dur)); if(yr) p.push(yv?`<span class="yr ${yv[0]}" title="${yv[1]}（加点）">${yr}</span>`:yr); if(t.pop!=null) p.push("POP "+t.pop); const l=labelOf(id,lm); if(l) p.push(esc(cut(l,28)));
   if(a && (a.en!=null||a.da!=null||a.va!=null)){ const f=v=>v==null?"–":Math.round(v*100);
     q.push(`<span class="af" title="エネルギー / ダンス度 / 明るさ（0〜100）">E${f(a.en)} D${f(a.da)} V${f(a.va)}</span>`); }
   return (p.length?`<div class="sub">${p.join(" · ")}</div>`:"")+(q.length?`<div class="sub">${q.join(" · ")}</div>`:""); }
@@ -702,7 +709,7 @@ function renderCands(keepSel){
   const max=top[0].sc, lm=labelMap();
   const rows = top.map((c,i)=>{ const t=S.tracks[c.id]; const m=S.meta[c.id]||{};
     return `<div class="cand${i===sel?" sel":""}" data-i="${i}" data-id="${c.id}"><span class="sc" title="全部の条件が揃ったときを100とした点">${list.weak?"—":c.pct}</span><img src="${esc(t.img)}" alt="" loading="lazy">
-      <div><div class="nm">${esc(t.name)}${(()=>{ const gl=genreList(c.id,lm); return (gl.length?gl.slice(0,3).map(x=>genrePill(x)).join(""):`<span class="gp none" title="ジャンル不明">？</span>`)+(c.gst?`<span class="gj ${c.gst[0]}">${c.gst[1]}</span>`:""); })()}</div><div class="muted">${esc(arts(t))}</div>${subLine(c.id,lm)}<div class="chips">${c.chips.map(([k,x])=>`<span class="chip ${k}">${esc(x)}</span>`).join("")}</div></div>
+      <div><div class="nm">${esc(t.name)}${(()=>{ const gl=genreList(c.id,lm); return (gl.length?gl.slice(0,3).map(x=>genrePill(x)).join(""):`<span class="gp none" title="ジャンル不明">？</span>`)+(c.gst?`<span class="gj ${c.gst[0]}">${c.gst[1]}</span>`:""); })()}</div><div class="muted">${esc(arts(t))}</div>${subLine(c.id,lm,c.yv)}<div class="chips">${c.chips.map(([k,x])=>`<span class="chip ${k}">${esc(x)}</span>`).join("")}</div></div>
       <span class="meta">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="meta" style="color:var(--accent2)">${m.key||"—"}</span>
       <span class="acts"><button class="sm" data-c="${c.id}" title="曲名をコピー（rekordboxの検索に貼り付け）">⎘</button><button class="sm" data-q="${c.id}">キュー</button><button class="sm" data-p="${c.id}">再生</button><button class="sm" data-n="${c.id}">Nowへ</button></span></div>`; }).join("");
   let html=(list.weak?`<div class="empty" style="padding:8px 0">今の曲の手がかり（BPM・キー・プレイリスト・音の特徴）が少ないので、参考として並べています。BPM／キーを入れるか、この曲を含むプレイリストを読み込むと精度が上がります。</div>`:"")+rows;
@@ -1141,7 +1148,7 @@ function syncPayload(){
   const meta={}; for(const [id,m] of Object.entries(S.meta)){ if(m.bpm||m.key||m.genre||m.rbBad) meta[id]={bpm:m.bpm||0,key:m.key||"",genre:m.genre||"",src:m.src||"",...(m.rbBad?{rbBad:1}:{})}; }
   const dg={}; for(const [id,v] of Object.entries(S.dg)) if(v) dg[id]=v;
   return {v:1, at:Date.now(), meta, dg, dz:S.dz, plSel:LS.get("plSel",[]), incSaved:LS.get("incSaved",false), dj:LS.get("dj",false), copyMode:LS.get("copyMode","title"),
-    weights:Object.fromEntries(["wFlow","wCo","wBpm","wKey","wGen"].map(k=>[k,LS.get(k,null)])), hist:S.hist, now:S.now, tags:S.tags}; }
+    weights:Object.fromEntries(["wFlow","wCo","wBpm","wKey","wGen","wYear"].map(k=>[k,LS.get(k,null)])), hist:S.hist, now:S.now, tags:S.tags}; }
 const SRC_RANK={manual:4,rekordbox:3,exportify:2,reccobeats:2,deezer:1,discogs:1,"":0};
 const SRC_LABEL={deezer:"Deezer",rekordbox:"rekordbox",exportify:"Exportify",reccobeats:"ReccoBeats",manual:"手入力",discogs:"Discogs"};
 function mergeMeta(remote){
@@ -1349,7 +1356,7 @@ $("#q").oninput=doSearch;
 $("#follow").onchange=e=>setFollow(e.target.checked);
 $("#btnExport").onclick=exportSet;
 $("#btnClearHist").onclick=()=>{ S.hist=[]; LS.set("hist",[]); refresh(); };
-["wFlow","wCo","wBpm","wKey","wGen"].forEach(id=>{ const el=$("#"+id); const sp=el.nextElementSibling; el.value=LS.get(id,el.value); sp.textContent=el.value;
+["wFlow","wCo","wBpm","wKey","wGen","wYear"].forEach(id=>{ const el=$("#"+id); const sp=el.nextElementSibling; el.value=LS.get(id,el.value); sp.textContent=el.value;
   el.oninput=()=>{ sp.textContent=el.value; LS.set(id,el.value); renderCands(); }; });
 ["fBpm","fKey","fArtist","fHalf"].forEach(id=>$("#"+id).onchange=renderCands);
 $("#fTag").onchange=e=>{ LS.set("fTag",e.target.value); renderCands(); };
