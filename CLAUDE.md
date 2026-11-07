@@ -33,14 +33,18 @@ DJ中に「次の曲」を自分のSpotifyライブラリから提案するブ�
 
 ## 曲データ（`slimTrack`）
 `{id, uri, name, artists, album, albumId, dur, isrc, img, pop, year}`。`pop` は Spotify人気度（TRACK_VER=2 で追加。LS `trackVer` が古いと次の読み込みで全PLを一度だけ読み直す）。
-候補行の下 `subLine()`: 1行目 長さ・年・POP・レーベル、2行目 ジャンル（meta.genre → 集めたアーティストのSpotifyジャンル）・AF（E/D/V＝energy/danceability/valence×100）。レーベルは通信せず、集めた曲情報（`S.ex`）→ 同じアルバムの曲の情報（`labelMap`）→ Exportify → Discogs の順で分かるものだけ。
+ジャンルは曲名の横に系統ごとに色分けしたラベル（`genrePill`、色は `GENRE_FAM` の系統 → `FAM_HUE`、不明は「？」）。デッキにも最大4つ。ジャンルの並び `genreList()` = meta.genre → アーティストのSpotifyジャンル。アーティストのジャンルは `agFill()` が全アーティスト分を `/artists?ids=`（50件ずつ）でまとめて取得し `S.ag[artistId]={g,at}`（IndexedDB "ag"、30日、空も記録）。起動時と `autoMeta` で自動。`labelMap().__ag` に合流するので genreSet/genreSim も同じデータを使う。
+候補行の下 `subLine()`: 1行目 長さ・年・POP・レーベル、2行目 2つ目以降のジャンル・AF（E/D/V＝energy/danceability/valence×100）。レーベルは通信せず、集めた曲情報（`S.ex`）→ 同じアルバムの曲の情報（`labelMap`）→ Exportify → Discogs の順で分かるものだけ。
 
 ## スコアリング（`suggest()`）
 重み: wFlow（自分のプレイリスト内で直前／直後に並べた曲）、wCo（同じプレイリストに共起、1/log2(len+2)で重み付け）、wBpm（±2/4/6/8%、倍／半分テンポ可）、wKey（Camelot相性 `keyCompat`）、wGen（ジャンル: `genreSet`（meta.genre＋アーティストのSpotifyジャンル）同士を `genreSim` で比較。完全一致1・単語一致0.5・大きな括り `GENRE_FAM`（metal系・house系…）一致0.4。両方分かっていて全く重ならなければ −wGen×2 と「ジャンル違い」チップ）。候補の点数は1位=100ではなく、全条件満点の合計 `ideal` を100とした `pct`（BPMとキーだけ合う曲が100に見えないように）。
 フィルタ: BPM幅、キー一致のみ、同アーティスト回避、倍／半分可。今の曲の手がかりが少なく1曲も残らないときは、点の低い曲も「候補 N曲（参考）」として注記付きで出す（`weak`）。
 選び方 `MODES`（LS `mode`、候補欄上部のボタン／Mキー）: 各モードの倍率 `m` をスライダーの重みに掛ける。
-- flow いつもの流れ（従来どおり）／similar 似た曲（`vibe()`: 音 `afSim` 0.6＋ジャンル `genreSim` 0.25（同じPLは含めない。ユーザー指定）。`afSim` は7特徴量 `AF_W` をライブラリ内の標準偏差 `afStats()` で割った重み付き距離 → 散らばり1つ分で50%。ジャンルはmeta.genre＋集めたアーティストのSpotifyジャンル、完全一致1・単語一致0.5。チップに理由（音・ジャンル））／surprise 意外性（並べたことのある曲を減点、初めての組み合わせ・人気の低さ・ゆらぎ `rnd01(now:seed)` を加点。🎲／Rで `S.seed` を変えて入れ替え）／up 上げる・down 落とす（energy 差 +0.03〜0.25 を加点）
+- flow いつもの流れ（従来どおり）／similar 似た曲（`vibe()`: 音 `afSim` 0.6＋ジャンル `genreSim` 0.25（同じPLは含めない。ユーザー指定）。`afSim` は7特徴量 `AF_W` をライブラリ内の標準偏差 `afStats()` で割った重み付き距離 → 散らばり1つ分で50%。ジャンルはmeta.genre＋集めたアーティストのSpotifyジャンル、完全一致1・単語一致0.5。チップに理由（音・ジャンル））／surprise ジャンル越え（キーは LS 互換のため "surprise" のまま。ユーザー指定で「自分にとっての意外性（初めての組み合わせ・隠れた曲）」はやめた。ジャンルが両方分かっていて全く違えば +cross、大きな括り一致なら半分、同ジャンルは0。音の近さ `afSim` で +snd（チップ「音の感じ NN%」）。flow/co は0。ゆらぎ `rnd01(now:seed)` 少し、🎲／Rで `S.seed` を変えて入れ替え）／up 上げる・down 落とす（energy 差 +0.03〜0.25 を加点）
 - af（energy等）は ReccoBeats／Exportify 由来。無い曲は雰囲気・エネルギーの加点なし
+
+## タグ（自分で付ける）
+`S.tags[id]={t:[...],at}`（IndexedDB "tags"、Gist同期は `at` が新しい方が勝つ）。デッキの「＋タグ」欄（Tキー、Enterで追加、日本語変換中のEnterは無視、×で外す、よく使うタグを「＋」で1クリック）。候補行にタグのチップ（今の曲と同じタグは緑）、同じタグ1つにつき +1.5（2つまで）。候補欄の「タグ」で絞り込み（LS `fTag`）。デッキの入力欄に入力中は `renderDeck` を止め、離れたら描き直す（`renderDeck(true)` で強制）。
 
 ## 曲情報の自動収集（`gatherInfo(id)` → `S.ex[id]`, IndexedDB "ex", 14日キャッシュ）
 Spotify（人気度・レーベル・リリース・アーティストのジャンル／フォロワー・トップ曲・別バージョン検索）／Deezer（BPM・ゲイン・ランク・アルバム）／MusicBrainz（ISRC→recording、タグ・初リリース、1req/秒。`mbLinks()` でサンプリング元／この曲をサンプリングした曲／リミックス元／カバー。関係は録音ごとに登録されるので、DJミックス内の録音を除き収録リリースの多い順に最大4録音を見て合算）／Wikipedia REST summary（ja→en、音楽系記事のみ、かつ返ってきた記事名がアーティスト名と一致するときだけ採用＝別ページへの転送を弾く）／Discogs。キャッシュは `EX_VER` が変わると取り直す。WhoSampled は公開APIがないので使わない。

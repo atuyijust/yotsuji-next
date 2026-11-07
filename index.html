@@ -60,6 +60,10 @@
   .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
   .cand .sub{font:11px var(--mono);color:var(--dim);margin-top:1px}
   .cand .sub .gen{color:var(--accent2)} .cand .sub .af{cursor:help}
+  .gp{display:inline-block;font:600 11px/1.5 system-ui,sans-serif;padding:0 7px;border-radius:9px;margin-left:6px;vertical-align:2px;white-space:nowrap;
+    color:hsl(var(--h) 70% 72%);background:hsl(var(--h) 45% 20% / .55);border:1px solid hsl(var(--h) 45% 38%)}
+  .gp.none{--h:0;color:var(--dim);background:none;border-color:var(--line);font-weight:400}
+  .deck .gps{margin-top:4px} .deck .gps .gp{margin:0 4px 0 0;font-size:12px}
   .cand{display:grid;grid-template-columns:34px 44px 1fr 70px 52px auto;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid var(--line)}
   .cand:hover{background:#111415}
   .cand img{width:44px;height:44px;border-radius:3px;object-fit:cover;background:#222}
@@ -71,6 +75,13 @@
   .chip.g{color:var(--accent);border-color:#2c4a41}
   .chip.y{color:var(--accent2);border-color:#4a412c}
   .chip.r{color:var(--warn);border-color:#4a2c2c}
+  .chip.tag{color:#c9b8ff;border-color:#3d3560}
+  .tags{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-top:8px}
+  .tags .chip{font-size:12px;padding:1px 8px}
+  .tags .chip button{background:none;border:0;color:inherit;cursor:pointer;padding:0 0 0 4px;font-size:12px}
+  .tags input{width:9em;font-size:12px;padding:3px 6px}
+  .tags .sug{cursor:pointer;opacity:.6}
+  .tags .sug:hover{opacity:1}
   .acts{display:flex;gap:4px}
   dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:12px;width:min(760px,94vw);max-height:86vh;padding:0}
   dialog::backdrop{background:#000a}
@@ -190,18 +201,19 @@
   <section class="list">
     <div id="mobileNow"><b>NOW</b><span class="muted">未選択</span></div>
     <div class="filters">
-      <span class="modes" id="modes"></span><button class="sm" id="reroll" title="意外性の候補を入れ替える（R）" hidden>🎲</button>
+      <span class="modes" id="modes"></span><button class="sm" id="reroll" title="ジャンル越えの候補を入れ替える（R）" hidden>🎲</button>
       <label class="ck">BPM幅
         <select id="fBpm"><option value="0">制限なし</option><option value="0.04">±4%</option><option value="0.06" selected>±6%</option><option value="0.1">±10%</option></select>
       </label>
       <label class="ck"><input type="checkbox" id="fKey"> キーが合う曲だけ</label>
       <label class="ck"><input type="checkbox" id="fArtist" checked> 同じアーティストを避ける</label>
       <label class="ck"><input type="checkbox" id="fHalf" checked> 倍／半分テンポも可</label>
+      <label class="ck" hidden title="このタグの曲だけ候補に出す">タグ <select id="fTag"></select></label>
       <label class="ck">コピー内容
         <select id="copyMode"><option value="title">曲名のみ</option><option value="both">曲名＋アーティスト</option><option value="artist">アーティストのみ</option></select>
       </label>
       <span class="muted" id="candInfo"></span>
-      <span class="keys"><b>↑↓</b> 選択 <b>Enter</b> Nowへ <b>/</b> 検索 <b>C</b> 曲名コピー <b>U</b> 取り消し <b>M</b> 選び方</span>
+      <span class="keys"><b>↑↓</b> 選択 <b>Enter</b> Nowへ <b>/</b> 検索 <b>C</b> 曲名コピー <b>U</b> 取り消し <b>T</b> タグ <b>M</b> 選び方</span>
     </div>
     <div id="cands"><div class="empty">ライブラリを読み込み、Now Playingを決めると候補が並びます。</div></div>
   </section>
@@ -292,6 +304,8 @@ const S = {
   meta:{},          // id -> {bpm,key,genre,src}
   dz:{},            // Deezer問い合わせ済み id -> bpm(0=不明)
   dg:{},            // Discogs情報 id -> {genre,style,label,year,url} / null=見つからず
+  ag:{},            // アーティストのSpotifyジャンル artistId -> {g:[...], at}（まとめて取得、30日ごと）
+  tags:{},          // 自分で付けたタグ id -> {t:["ピーク",...], at:更新時刻}（Gistで同期、新しい方が勝つ）
   ex:{},            // 自動収集した曲情報 id -> {at,done,sp,dz,mb,wk}
   occ:{},           // id -> [[plIdx,pos],...]
   now:null, hist:[], me:null, lastPlayingId:null
@@ -500,7 +514,7 @@ function genOf(id){ return (S.meta[id]?.genre||"").toLowerCase().split(/[\/,;]/)
 const MODES={
   flow:    {label:"いつもの流れ", tip:"自分のプレイリストで並べた順を重視",                      m:{flow:1,   co:1,   bpm:1,key:1,gen:1,  af:0, nov:0, rnd:0,  pop:0, eng:0}},
   similar: {label:"似た曲",       tip:"音の特徴（エネルギー・ダンス度・明るさ・生音っぽさ・インスト度・ボーカル量・音量をライブラリ内で比較）とジャンルから見て雰囲気が近い曲",            m:{flow:.3,  co:.6,  bpm:1,key:1,gen:1.5,af:3, nov:0, rnd:0,  pop:0, eng:0}},
-  surprise:{label:"意外性",       tip:"つながる（BPM・キー）けど、まだ並べたことのない曲。🎲で入れ替え", m:{flow:-.6, co:-.3, bpm:1,key:1,gen:.3, af:.8,nov:2, rnd:1.5,pop:1, eng:0}},
+  surprise:{label:"ジャンル越え", tip:"ジャンルは違うけど、BPM・キー・音の感じ（エネルギー・ダンス度など）がつながる曲。🎲で入れ替え", m:{flow:0, co:0, bpm:1,key:1,gen:0, af:0,nov:0, rnd:.5,pop:0, eng:0, cross:2.5, snd:2}},
   up:      {label:"上げる",       tip:"今よりエネルギーが少し高い曲",                              m:{flow:.5,  co:.5,  bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0,  pop:0, eng:3}},
   down:    {label:"落とす",       tip:"今よりエネルギーが少し低い曲",                              m:{flow:.5,  co:.5,  bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0,  pop:0, eng:3}},
 };
@@ -554,16 +568,18 @@ function suggest(){
     for(const id of new Set(ids)) co[id]=(co[id]||0)+wgt;
   }
   const curBpm=bpmOf(cur), curKey=keyOf(cur), curGen=genOf(cur), curArt=new Set(S.tracks[cur]?.artists.map(a=>a.id)), curAf=afOf(cur);
-  const lm=labelMap(), vctx={curAf, st:M.af?afStats():{}, lm, curG:genreSet(cur,lm)};
+  const lm=labelMap(), vctx={curAf, st:(M.af||M.snd)?afStats():{}, lm, curG:genreSet(cur,lm)};
   const fB=+$("#fBpm").value, fK=$("#fKey").checked, fA=$("#fArtist").checked, half=$("#fHalf").checked;
-  const W={flow:w("wFlow")*M.flow,co:w("wCo")*M.co,bpm:w("wBpm")*M.bpm,key:w("wKey")*M.key,gen:w("wGen")*M.gen,af:M.af,nov:M.nov,rnd:M.rnd,pop:M.pop,eng:M.eng};
+  const W={flow:w("wFlow")*M.flow,co:w("wCo")*M.co,bpm:w("wBpm")*M.bpm,key:w("wKey")*M.key,gen:w("wGen")*M.gen,af:M.af,nov:M.nov,rnd:M.rnd,pop:M.pop,eng:M.eng,cross:M.cross||0,snd:M.snd||0};
   const seed=cur+":"+(S.seed||0);
   // 点数の表示用: 全部の条件が満点のときの合計（1位を100にすると、BPMとキーが合うだけの曲も100に見えてしまうため）
-  const ideal=Math.max(1, [W.flow,W.co,W.bpm,W.key,W.gen].reduce((x,v)=>x+Math.max(0,v),0)+(W.af>0?W.af*1.2:0)+W.nov+W.rnd+W.pop*.6+W.eng);
+  const curTags=tagsOf(cur), fTag=LS.get("fTag",""), TAG_W=1.5;  // 今の曲と同じタグ1つにつき +1.5（2つまで）
+  const ideal=Math.max(1, [W.flow,W.co,W.bpm,W.key,W.gen].reduce((x,v)=>x+Math.max(0,v),0)+(W.af>0?W.af*1.2:0)+W.nov+W.rnd+W.pop*.6+W.eng+W.cross+W.snd*1.2+(curTags.length?TAG_W*Math.min(2,curTags.length):0));
   const pool = new Set([...Object.keys(S.occ), ...S.saved]);
   const res=[], weak=[];
   for(const id of pool){
     if(played.has(id)) continue; const t=S.tracks[id]; if(!t) continue;
+    const tg=tagsOf(id); if(fTag && !tg.includes(fTag)) continue;
     const sameArt = t.artists.some(a=>curArt.has(a.id));
     if(fA && sameArt) continue;
     const chips=[]; let sc=0;
@@ -583,6 +599,9 @@ function suggest(){
     else if(fK && curKey) continue;
     // ジャンル: 曲のジャンル＋アーティストのSpotifyジャンルで比べる。両方分かっていて全く重ならなければ減点
     const gSet=genreSet(id,lm), gs=genreSim(vctx.curG,gSet);
+    // ジャンル越え: ジャンルが違う（両方分かっている）ほど加点、同じジャンルは加点なし。音の感じが近いほど加点
+    if(W.cross && gs!=null){ const v=gs===0?1:gs<.5?.5:0; sc+=W.cross*v; if(v) chips.push([v===1?"g":"y",`ジャンル越え（${cut([...vctx.curG][0]||"",14)} → ${cut([...gSet][0]||"",14)}）`]); }
+    if(W.snd){ const sd=afSim(curAf,afOf(id),vctx.st); if(sd!=null){ sc+=W.snd*(sd-.4)*2; if(sd>=.55) chips.push([sd>=.7?"g":"y",`音の感じ ${Math.round(sd*100)}%`]); } }
     if(gs!=null && W.gen){ if(gs>0){ sc+=W.gen*gs; chips.push([gs>=1?"g":"y", genreHit(vctx.curG,gSet)]); } else { sc-=W.gen*2; chips.push(["r","ジャンル違い"]); } }
     const af=afOf(id);
     if(W.af){ const vb=vibe(cur,id,vctx); if(vb){ sc+=W.af*(vb.v-.4)*2; if(W.af>=1 && vb.v>=.55) chips.push([vb.v>=.7?"g":"y",`雰囲気 ${Math.round(vb.v*100)}%${vb.why.length?"（"+vb.why.join("・")+"）":""}`]); } }
@@ -594,6 +613,7 @@ function suggest(){
     if(W.pop && t.pop!=null){ sc+=W.pop*(1-t.pop/100)*.6; if(t.pop<30) chips.push(["y","隠れた曲"]); }
     if(W.rnd) sc+=W.rnd*rnd01(seed+id);
     if(sameArt){ sc+=0.3; chips.push(["y","同アーティスト"]); }
+    if(tg.length){ const sh=tg.filter(x=>curTags.includes(x)); sc+=TAG_W*Math.min(2,sh.length); for(const x of tg) chips.push(["tag"+(sh.includes(x)?" g":""),"#"+x]); }
     if(sc<=0){ weak.push({id,sc,chips}); continue; }
     res.push({id,sc,chips});
   }
@@ -613,16 +633,22 @@ let toastT=0;
 function toast(m){ setStatus(m); let el=$("#toast"); if(!el){ el=document.createElement("div"); el.id="toast"; el.setAttribute("role","status"); document.body.appendChild(el); }
   el.textContent=m; el.classList.add("on"); clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove("on"),m.length>30?6000:3000); }
 
-function renderDeck(){
+function renderDeck(force){
   if(later(renderDeck)) return;
+  // デッキの入力欄（BPM・キー・タグ）に入力中は描き直さない（打っている文字が消えるため）。離れたら描き直す
+  const ae=document.activeElement; if(force!==true && ae?.tagName==="INPUT" && ae.closest("#deck")){ if(!ae.dataset.later){ ae.dataset.later=1; ae.addEventListener("blur",()=>setTimeout(renderDeck,0),{once:true}); } return; }
   const t=S.tracks[S.now];
   if(!t){ $("#deck").innerHTML=`<div class="muted">曲が未選択です。下の検索か、Spotifyの再生追従で選んでください。</div>`; $("#mobileNow").innerHTML=`<b>NOW</b><span class="muted">未選択</span>`; return; }
   const m=S.meta[t.id]||{};
   const undo=S.hist.length?`<button class="sm" data-undo title="ひとつ前のNowに戻す（U）">↶ 戻す</button>`:"";
   $("#mobileNow").innerHTML=`<b>NOW</b>${esc(t.name)} <span class="muted">— ${esc(arts(t))}</span><span class="m">${m.bpm?m.bpm.toFixed(1):"—"} ${m.key||""}</span>${undo?" "+undo:""}`;
-  $("#deck").innerHTML=`<div class="row"><img src="${esc(t.img)}" alt=""><div><div class="t">${esc(t.name)}</div><div class="a">${esc(arts(t))}</div><div class="muted">${esc(t.album)} ${t.year||""}</div></div></div>
+  $("#deck").innerHTML=`<div class="row"><img src="${esc(t.img)}" alt=""><div><div class="t">${esc(t.name)}</div><div class="a">${esc(arts(t))}</div>${(()=>{ const gl=genreList(t.id,labelMap()); return gl.length?`<div class="gps">${gl.slice(0,4).map(x=>genrePill(x,true)).join("")}</div>`:""; })()}<div class="muted">${esc(t.album)} ${t.year||""}</div></div></div>
    <div class="bk"><span class="big">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="muted">BPM</span><span class="big k">${m.key||"—"}</span><span class="muted">${m.genre?esc(m.genre):""} ${m.src?"("+(SRC_LABEL[m.src]||m.src)+(m.kSrc&&m.kSrc!==m.src?" / キー: "+(SRC_LABEL[m.kSrc]||m.kSrc):"")+(m.bSrc&&m.bSrc!==m.src?" / BPM: "+(SRC_LABEL[m.bSrc]||m.bSrc):"")+")":""}${m.src==="rekordbox"&&m.rbName&&norm(m.rbName)!==norm(t.name)?` <span class="muted" title="rekordbox のこの曲と照合しました">← rekordbox「${esc(m.rbName)}」</span>`:""}</span></div>
-   <div class="bk"><input id="eBpm" placeholder="BPM" value="${m.bpm||""}"><input id="eKey" placeholder="キー 8A/Am" value="${m.key||""}"><button class="sm" id="saveMeta">保存</button><button class="sm" id="tap">TAP</button><button class="sm" data-p="${t.id}" title="Spotifyで再生">▶ 再生</button><button class="sm" data-c="${t.id}" title="曲名をコピー">⎘ コピー</button>${undo}<span class="muted" id="tapv"></span></div>`;
+   <div class="bk"><input id="eBpm" placeholder="BPM" value="${m.bpm||""}"><input id="eKey" placeholder="キー 8A/Am" value="${m.key||""}"><button class="sm" id="saveMeta">保存</button><button class="sm" id="tap">TAP</button><button class="sm" data-p="${t.id}" title="Spotifyで再生">▶ 再生</button><button class="sm" data-c="${t.id}" title="曲名をコピー">⎘ コピー</button>${undo}<span class="muted" id="tapv"></span></div>
+   <div class="tags" id="deckTags">${tagsOf(t.id).map(x=>`<span class="chip tag">#${esc(x)}<button data-deltag="${esc(x)}" title="外す">×</button></span>`).join("")}<input id="tagIn" placeholder="＋タグ（T）" list="tagList" autocomplete="off"><datalist id="tagList">${allTags().map(x=>`<option value="${esc(x)}">`).join("")}</datalist>${allTags().filter(x=>!tagsOf(t.id).includes(x)).slice(0,6).map(x=>`<span class="chip sug" data-addtag="${esc(x)}" title="このタグを付ける">＋${esc(x)}</span>`).join("")}</div>`;
+  $("#tagIn").onkeydown=e=>{ if(e.isComposing||e.keyCode===229) return;  // 日本語変換の確定Enterでは追加しない
+    if(e.key==="Enter"){ e.preventDefault(); const v=e.target.value; if(cleanTag(v)){ addTag(t.id,v); setTimeout(()=>$("#tagIn")?.focus(),0); } } else if(e.key==="Escape"){ e.target.value=""; e.target.blur(); } };
+  $("#deckTags").onclick=e=>{ const d=e.target.closest("[data-deltag]"), a=e.target.closest("[data-addtag]"); if(d) delTag(t.id,d.dataset.deltag); else if(a) addTag(t.id,a.dataset.addtag); };
   $("#saveMeta").onclick=()=>{ const bpm=parseFloat($("#eBpm").value)||null; const kRaw=$("#eKey").value.trim(); const key=toCamelot(kRaw);
     if(kRaw && !key){ toast("キーは 8A や Am の形で入力してください"); return; }
     const {kSrc,bSrc,...rest}=S.meta[t.id]||{}; S.meta[t.id]={...rest,bpm,key,src:"manual"}; DB.set("meta",S.meta); refresh(); autoSync(); };
@@ -637,6 +663,7 @@ let sel=0;
 function labelMap(){ const m={}, ag={};
   for(const [id,e] of Object.entries(S.ex)){ const l=e?.sp?.label||e?.dz?.album?.label; const al=S.tracks[id]?.albumId; if(l&&al&&!m[al]) m[al]=l;
     for(const a of e?.sp?.artists||[]) if(a.id && a.genres?.length && !ag[a.id]) ag[a.id]=a.genres; }
+  for(const [aid,v] of Object.entries(S.ag)) if(v?.g?.length && !ag[aid]) ag[aid]=v.g;
   m.__ag=ag; return m; }
 function genreText(id,lm){ const g=S.meta[id]?.genre; if(g) return g;
   for(const a of S.tracks[id]?.artists||[]){ const x=lm.__ag?.[a.id]; if(x) return x.slice(0,2).join("/"); }
@@ -646,7 +673,7 @@ function labelOf(id,lm){ const e=S.ex[id], t=S.tracks[id];
 const cut=(x,n)=>x.length>n?x.slice(0,n-1)+"…":x;
 function subLine(id,lm){ const t=S.tracks[id], a=S.meta[id]?.af; const p=[], q=[];
   if(t.dur) p.push(fmtDur(t.dur)); if(t.year) p.push(t.year); if(t.pop!=null) p.push("POP "+t.pop); const l=labelOf(id,lm); if(l) p.push(esc(cut(l,28)));
-  const g=genreText(id,lm); if(g) q.push(`<span class="gen">${esc(cut(g,32))}</span>`);
+  const gl=genreList(id,lm); if(gl.length>1) q.push(`<span class="gen">${esc(cut(gl.slice(1,3).join(" / "),32))}</span>`);
   if(a && (a.en!=null||a.da!=null||a.va!=null)){ const f=v=>v==null?"–":Math.round(v*100);
     q.push(`<span class="af" title="エネルギー / ダンス度 / 明るさ（0〜100）">E${f(a.en)} D${f(a.da)} V${f(a.va)}</span>`); }
   return (p.length?`<div class="sub">${p.join(" · ")}</div>`:"")+(q.length?`<div class="sub">${q.join(" · ")}</div>`:""); }
@@ -666,12 +693,22 @@ function renderCands(keepSel){
   const max=top[0].sc, lm=labelMap();
   const rows = top.map((c,i)=>{ const t=S.tracks[c.id]; const m=S.meta[c.id]||{};
     return `<div class="cand${i===sel?" sel":""}" data-i="${i}" data-id="${c.id}"><span class="sc" title="全部の条件が揃ったときを100とした点">${list.weak?"—":c.pct}</span><img src="${esc(t.img)}" alt="" loading="lazy">
-      <div><div class="nm">${esc(t.name)}</div><div class="muted">${esc(arts(t))}</div>${subLine(c.id,lm)}<div class="chips">${c.chips.map(([k,x])=>`<span class="chip ${k}">${esc(x)}</span>`).join("")}</div></div>
+      <div><div class="nm">${esc(t.name)}${(()=>{ const gl=genreList(c.id,lm); return gl.length?genrePill(gl[0]):`<span class="gp none" title="ジャンル不明">？</span>`; })()}</div><div class="muted">${esc(arts(t))}</div>${subLine(c.id,lm)}<div class="chips">${c.chips.map(([k,x])=>`<span class="chip ${k}">${esc(x)}</span>`).join("")}</div></div>
       <span class="meta">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="meta" style="color:var(--accent2)">${m.key||"—"}</span>
       <span class="acts"><button class="sm" data-c="${c.id}" title="曲名をコピー（rekordboxの検索に貼り付け）">⎘</button><button class="sm" data-q="${c.id}">キュー</button><button class="sm" data-p="${c.id}">再生</button><button class="sm" data-n="${c.id}">Nowへ</button></span></div>`; }).join("");
   const html=(list.weak?`<div class="empty" style="padding:8px 0">今の曲の手がかり（BPM・キー・プレイリスト・音の特徴）が少ないので、参考として並べています。BPM／キーを入れるか、この曲を含むプレイリストを読み込むと精度が上がります。</div>`:"")+rows;
   if(html!==candsHtml){ candsHtml=html; $("#cands").innerHTML=html; }  // 変化がなければ触らない
 }
+// ---------- タグ（自分で付ける。例: ピーク・朝方・ボーカル） ----------
+const tagsOf=id=>S.tags[id]?.t||[];
+const cleanTag=x=>String(x||"").replace(/^#/,"").replace(/\s+/g," ").trim().slice(0,24);
+function allTags(){ const n={}; for(const v of Object.values(S.tags)) for(const t of v.t||[]) n[t]=(n[t]||0)+1; return Object.entries(n).sort((a,b)=>b[1]-a[1]).map(x=>x[0]); }
+function setTags(id,list){ const t=[...new Set(list.map(cleanTag).filter(Boolean))]; S.tags[id]={t,at:Date.now()}; DB.set("tags",S.tags); renderTagFilter(); refresh(); renderDeck(true); autoSync(); }
+function addTag(id,x){ const t=cleanTag(x); if(!t||tagsOf(id).includes(t)) return; setTags(id,[...tagsOf(id),t]); }
+function delTag(id,x){ setTags(id,tagsOf(id).filter(t=>t!==x)); }
+function renderTagFilter(){ const el=$("#fTag"); if(!el) return; const cur=LS.get("fTag",""), all=allTags();
+  el.innerHTML=`<option value="">すべて</option>`+all.map(t=>`<option${t===cur?" selected":""}>${esc(t)}</option>`).join("")+(cur&&!all.includes(cur)?`<option selected>${esc(cur)}</option>`:"");
+  el.closest("label").hidden=!all.length && !cur; }
 function refresh(){ renderDeck(); renderHist(); renderCands(); renderInfo(); }
 
 function setNow(id, push=true){
@@ -808,8 +845,29 @@ async function rbFill(ids, quiet){
   return got;
 }
 // 読み込み後の自動補完：ReccoBeats → 残りをDeezer → 同期
+// ---------- ジャンルをひと目で（系統ごとに色分けしたラベル） ----------
+const FAM_HUE={metal:0,punk:15,rock:30,house:165,techno:200,trance:250,dnb:280,bass:300,hardstyle:330,edm:185,hiphop:45,rnb:55,latin:95,caribbean:120,pop:340,jazz:70,ambient:220};
+function genrePill(g,big){ if(!g) return ""; const f=famOf(g.toLowerCase())[0]; const h=f!=null?FAM_HUE[f]:null;
+  return `<span class="gp"${h!=null?` style="--h:${h}"`:` style="--h:210;filter:saturate(0)"`} title="${esc(g)}${f?"（"+f+"系）":""}">${esc(cut(g,big?28:22))}</span>`; }
+function genreList(id,lm){ const out=[], g=S.meta[id]?.genre; if(g) out.push(...g.split(/[\/,;]/).map(x=>x.trim()).filter(Boolean));
+  for(const a of S.tracks[id]?.artists||[]) for(const x of lm.__ag?.[a.id]||[]) if(!out.some(y=>y.toLowerCase()===x.toLowerCase())) out.push(x);
+  return out; }
+// 全アーティストのSpotifyジャンルをまとめて取得（/artists?ids= 50件ずつ）。取れなかった（空）も記録して30日は聞き直さない
+const AG_TTL=1000*60*60*24*30; let agRunning=false;
+async function agFill(){ if(agRunning || !(await token())) return 0; agRunning=true; let got=0;
+  try{ const now=Date.now(), need=new Set();
+    for(const t of Object.values(S.tracks)) for(const a of t.artists||[]) if(a.id && !(S.ag[a.id] && now-S.ag[a.id].at<AG_TTL)) need.add(a.id);
+    const ids=[...need];
+    for(let i=0;i<ids.length;i+=50){ const part=ids.slice(i,i+50);
+      const j=await api("/artists?ids="+part.join(",")).catch(()=>null); if(!j) break;
+      for(const a of j.artists||[]) if(a?.id){ S.ag[a.id]={g:a.genres||[],at:now}; if(a.genres?.length) got++; }
+      if(ids.length>100) setStatus(`アーティストのジャンルを取得中… ${Math.min(i+50,ids.length)}/${ids.length}`);
+      if(i%500===450){ DB.set("ag",S.ag); renderCands(true); } await sleep(150); }
+    await DB.set("ag",S.ag); if(ids.length){ renderCands(true); renderDeck(); if(ids.length>100) setStatus(`アーティストのジャンル：${got}組を取得しました`); }
+  }finally{ agRunning=false; } return got; }
 async function autoMeta(){
   let got=0;
+  agFill();
   if(LS.get("autoRb",true)) got=await rbFill();
   if(LS.get("autoDz",true)) fillBpm(); else if(got) autoSync();
 }
@@ -1067,10 +1125,10 @@ async function findGist(){ let id=LS.get("gistId",""); if(id){ const r=await gh(
     const g=j.find(x=>x.files&&x.files[SYNC_FILE]); if(g){ LS.set("gistId",g.id); return g.id; } }
   return null; }
 function syncPayload(){
-  const meta={}; for(const [id,m] of Object.entries(S.meta)){ if(m.bpm||m.key||m.genre) meta[id]={bpm:m.bpm||0,key:m.key||"",genre:m.genre||"",src:m.src||""}; }
+  const meta={}; for(const [id,m] of Object.entries(S.meta)){ if(m.bpm||m.key||m.genre||m.rbBad) meta[id]={bpm:m.bpm||0,key:m.key||"",genre:m.genre||"",src:m.src||"",...(m.rbBad?{rbBad:1}:{})}; }
   const dg={}; for(const [id,v] of Object.entries(S.dg)) if(v) dg[id]=v;
   return {v:1, at:Date.now(), meta, dg, dz:S.dz, plSel:LS.get("plSel",[]), incSaved:LS.get("incSaved",false), dj:LS.get("dj",false), copyMode:LS.get("copyMode","title"),
-    weights:Object.fromEntries(["wFlow","wCo","wBpm","wKey","wGen"].map(k=>[k,LS.get(k,null)])), hist:S.hist, now:S.now}; }
+    weights:Object.fromEntries(["wFlow","wCo","wBpm","wKey","wGen"].map(k=>[k,LS.get(k,null)])), hist:S.hist, now:S.now, tags:S.tags}; }
 const SRC_RANK={manual:4,rekordbox:3,exportify:2,reccobeats:2,deezer:1,discogs:1,"":0};
 const SRC_LABEL={deezer:"Deezer",rekordbox:"rekordbox",exportify:"Exportify",reccobeats:"ReccoBeats",manual:"手入力",discogs:"Discogs"};
 function mergeMeta(remote){
@@ -1084,6 +1142,8 @@ function mergeMeta(remote){
     if(rr>lr || !l.src) n.src=r.src||l.src;
     if(JSON.stringify(n)!==JSON.stringify(l)){ S.meta[id]=n; changed++; } }
   for(const [id,v] of Object.entries(remote.dg||{})) if(!S.dg[id]) S.dg[id]=v;
+  let tg=0; for(const [id,v] of Object.entries(remote.tags||{})) if(v && (v.at||0)>(S.tags[id]?.at||0)){ S.tags[id]=v; tg++; }
+  if(tg){ DB.set("tags",S.tags); renderTagFilter(); changed+=tg; }
   for(const [id,v] of Object.entries(remote.dz||{})) if(!(id in S.dz)) S.dz[id]=v;
   return changed; }
 let syncing=false, syncQueued=false;
@@ -1217,6 +1277,7 @@ document.addEventListener("keydown",e=>{
   }
   if(typing) return;
   if(e.key==="/"){ e.preventDefault(); $("#q").focus(); }
+  else if((e.key==="t"||e.key==="T") && $("#tagIn")){ e.preventDefault(); $("#tagIn").focus(); }
   else if(e.key==="ArrowDown"||e.key==="j"){ e.preventDefault(); moveSel(1); }
   else if(e.key==="ArrowUp"||e.key==="k"){ e.preventDefault(); moveSel(-1); }
   else if(e.key==="Enter"){ const r=$$("#cands .cand")[sel]; if(r){ e.preventDefault(); setNow(r.dataset.id); } }
@@ -1271,6 +1332,7 @@ $("#btnClearHist").onclick=()=>{ S.hist=[]; LS.set("hist",[]); refresh(); };
 ["wFlow","wCo","wBpm","wKey","wGen"].forEach(id=>{ const el=$("#"+id); const sp=el.nextElementSibling; el.value=LS.get(id,el.value); sp.textContent=el.value;
   el.oninput=()=>{ sp.textContent=el.value; LS.set(id,el.value); renderCands(); }; });
 ["fBpm","fKey","fArtist","fHalf"].forEach(id=>$("#"+id).onchange=renderCands);
+$("#fTag").onchange=e=>{ LS.set("fTag",e.target.value); renderCands(); };
 function renderModes(){ const cur=LS.get("mode","flow");
   $("#modes").innerHTML=Object.entries(MODES).map(([k,v])=>`<button data-mode="${k}" class="${k===cur?"on":""}" title="${esc(v.tip)}">${v.label}</button>`).join("");
   $("#reroll").hidden=cur!=="surprise"; }
@@ -1298,10 +1360,10 @@ $("#autoInfo").checked=LS.get("autoInfo",true); $("#autoInfo").onchange=e=>{ LS.
 (async()=>{
   await DB.open();
   S.tracks=await DB.get("tracks")||{}; S.playlists=await DB.get("playlists")||[]; S.saved=await DB.get("saved")||[];
-  S.meta=await DB.get("meta")||{}; S.dz=await DB.get("dz")||{}; S.dg=await DB.get("dg")||{}; S.rb=await DB.get("rb")||{}; S.ex=await DB.get("ex")||{}; S.plIndex=await DB.get("plIndex")||[];
+  S.meta=await DB.get("meta")||{}; S.dz=await DB.get("dz")||{}; S.dg=await DB.get("dg")||{}; S.rb=await DB.get("rb")||{}; S.ex=await DB.get("ex")||{}; S.tags=await DB.get("tags")||{}; S.ag=await DB.get("ag")||{}; S.plIndex=await DB.get("plIndex")||[];
   for(const v of Object.values(S.ex)) v.running=false;
   S.hist=LS.get("hist",[]); S.now=LS.get("now",null);
-  buildIndex();
+  buildIndex(); renderTagFilter();
   if(matchMedia("(max-width:760px)").matches){ $("#dWeights").open=false; $("#dHist").open=false; $("#info").open=false; }
   const authErr=new URLSearchParams(location.search).has("error");
   try{ await handleRedirect(); }catch(e){ toast("認証失敗："+e.message); }
@@ -1316,6 +1378,7 @@ $("#autoInfo").checked=LS.get("autoInfo",true); $("#autoInfo").onchange=e=>{ LS.
   if(LS.get("autoSync",true) && LS.get("ghTok","")) await syncPull(true);
   if(authed) await autoRefreshLib(true);
   if(LS.get("autoRb",true) && !S.scanning) rbFill().then(g=>{ if(g) autoSync(); });
+  if(authed && !S.scanning) agFill();
   setTimeout(checkUpdate,20e3);
   setInterval(async()=>{ if(document.visibilityState!=="visible") return; await checkUpdate(); autoRefreshLib(); },10*60e3);
   document.addEventListener("visibilitychange",async()=>{
