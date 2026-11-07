@@ -688,8 +688,24 @@ async function withDevice(fn,what){
     try{ await fn(d.id); return true; }catch(e2){ toast(playErr(e2,what)); return false; } } }
 async function queue(id){ const uri=S.tracks[id].uri; toast("Spotifyのキューに追加中…");
   if(await withDevice(dv=>api(`/me/player/queue?uri=${encodeURIComponent(uri)}${dv?"&device_id="+dv:""}`,{method:"POST"}),"キュー追加")) toast("キューに追加："+S.tracks[id].name); }
-async function play(id){ const uri=S.tracks[id].uri; toast("Spotifyに再生を指示中…");
-  if(await withDevice(dv=>api(`/me/player/play${dv?"?device_id="+dv:""}`,{method:"PUT",body:JSON.stringify({uris:[uri]})}),"再生")){ toast("再生："+S.tracks[id].name); if(S.now!==id) setNow(id); } }
+// 再生の指示が通っても Spotify 側で曲が読み込まれず「無」になることがある（Macアプリで確認）。
+// 指示のあと実際に鳴っている曲を確かめ、違えば アルバム文脈で再送 → それでもだめなら Spotify アプリで曲を開く
+async function nowPlayingId(){ const j=await api("/me/player?market=from_token").catch(()=>null); return j?{id:j.item?.id||"",from:j.item?.linked_from?.id||"",playing:j.is_playing,dev:j.device?.name||""}:null; }
+async function confirmPlay(id){ for(let i=0;i<4;i++){ await sleep(700); const p=await nowPlayingId(); if(p && (p.id===id||p.from===id)) return true; } return false; }
+function openInSpotify(id){ const a=document.createElement("a"); a.href="spotify:track:"+id; a.click(); }
+async function play(id){ const t=S.tracks[id], uri=t.uri||("spotify:track:"+id); toast("Spotifyに再生を指示中…");
+  let dev="";
+  const send=body=>withDevice(dv=>{ if(dv) dev=dv; return api(`/me/player/play${(dv||dev)?"?device_id="+(dv||dev):""}`,{method:"PUT",body:JSON.stringify(body)}); },"再生");
+  if(!(await send({uris:[uri]}))) return;
+  if(S.now!==id) setNow(id);
+  if(await confirmPlay(id)){ toast("再生："+t.name); return; }
+  // 2回目: アルバムの中のその曲として再生（単曲指定で読み込めないときに効くことがある）
+  if(t.albumId){ toast("Spotifyで読み込めなかったので、アルバムから再生し直しています…");
+    if(await send({context_uri:"spotify:album:"+t.albumId, offset:{uri}}) && await confirmPlay(id)){ toast("再生："+t.name); return; } }
+  const p=await nowPlayingId();
+  toast(`Spotifyで再生が始まりませんでした（${p?.dev?"デバイス: "+p.dev+"、":""}${p?.id?"今の曲は別の曲":"曲が読み込まれていません"}）。Spotifyアプリでこの曲を開きます`);
+  openInSpotify(id);
+}
 let pollTimer=null;
 async function poll(){
   try{ const j=await api("/me/player/currently-playing"); const t=j&&j.item&&slimTrack(j.item);
