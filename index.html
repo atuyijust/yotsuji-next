@@ -119,6 +119,8 @@
   details.side summary h2{display:inline;margin:0}
   details.side summary::before{content:"▾ ";color:var(--dim);font-size:10px} details.side:not([open]) summary::before{content:"▸ "}
   #mobileNow{display:none}
+  #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);max-width:min(92vw,560px);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:13px;box-shadow:0 6px 24px rgba(0,0,0,.4);z-index:50;opacity:0;pointer-events:none;transition:opacity .2s}
+  #toast.on{opacity:1}
   @media (max-width:760px){
     header{flex-wrap:wrap;gap:8px 12px;padding:8px 12px}
     header .sp{display:none}
@@ -589,7 +591,9 @@ const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const arts=t=>t.artists.map(a=>a.name).join(", ");
 function setStatus(m){ $("#status").textContent=m; }
-function toast(m){ setStatus(m); }
+let toastT=0;
+function toast(m){ setStatus(m); let el=$("#toast"); if(!el){ el=document.createElement("div"); el.id="toast"; el.setAttribute("role","status"); document.body.appendChild(el); }
+  el.textContent=m; el.classList.add("on"); clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove("on"),m.length>30?6000:3000); }
 
 function renderDeck(){
   if(later(renderDeck)) return;
@@ -677,9 +681,9 @@ async function withDevice(fn,what){
     if(!/^404/.test(e.message||"")){ toast(playErr(e,what)); return false; }
     const d=await pickDevice(); if(!d){ toast(playErr(e,what)); return false; }
     try{ await fn(d.id); return true; }catch(e2){ toast(playErr(e2,what)); return false; } } }
-async function queue(id){ const uri=S.tracks[id].uri;
+async function queue(id){ const uri=S.tracks[id].uri; toast("Spotifyのキューに追加中…");
   if(await withDevice(dv=>api(`/me/player/queue?uri=${encodeURIComponent(uri)}${dv?"&device_id="+dv:""}`,{method:"POST"}),"キュー追加")) toast("キューに追加："+S.tracks[id].name); }
-async function play(id){ const uri=S.tracks[id].uri;
+async function play(id){ const uri=S.tracks[id].uri; toast("Spotifyに再生を指示中…");
   if(await withDevice(dv=>api(`/me/player/play${dv?"?device_id="+dv:""}`,{method:"PUT",body:JSON.stringify({uris:[uri]})}),"再生")){ toast("再生："+S.tracks[id].name); if(S.now!==id) setNow(id); } }
 let pollTimer=null;
 async function poll(){
@@ -1074,25 +1078,36 @@ function norm(s){ return String(s||"").toLowerCase().normalize("NFKC")
   .replace(/\((original|extended)( mix)?\)|- (original|extended)( mix)?$/g,"").replace(/\s*[\(\[]?(feat\.?|ft\.?)[^\)\]]*[\)\]]?/g,"")
   .replace(/ - \d{4} remaster(ed)?.*$| - remaster(ed)?.*$/g,"").replace(/[^\p{L}\p{N}]+/gu,""); }
 function normLoose(s){ return norm(String(s||"").replace(/[\(\[].*?[\)\]]/g,"").replace(/ - .*$/,"")); }
+// 曲名の「版」（リミックス・エディット等）。Original/Extended/Radio Edit・リマスター・feat. は同じ曲扱いで ""
+const VER_NEUTRAL=/^(original( mix| version)?|extended( mix| version)?|radio( edit| version| mix)?|album( version| mix)?|single( version| edit)?|main( mix)?|clean|explicit|dirty|mono|stereo|(\d{4} )?remaster(ed)?( \d{4})?( version)?|feat\.?.*|ft\.?.*|with .*|from .*)$/;
+const VER_WORD=/remix|rmx|mix|edit|bootleg|rework|refix|flip|vip|dub|version|cover|mashup|redrum|re-?edit|live|acoustic|instrumental|acapella|a cappella/;
+function verKey(name){ const segs=[...String(name||"").matchAll(/[\(\[]([^\)\]]*)[\)\]]/g)].map(m=>m[1]); const d=String(name||"").split(/ - /).slice(1); segs.push(...d);
+  return segs.map(x=>x.toLowerCase().normalize("NFKC").replace(/\s+/g," ").trim()).filter(x=>x && !VER_NEUTRAL.test(x) && VER_WORD.test(x)).map(norm).sort().join("+"); }
 async function importXml(file){
   const doc = new DOMParser().parseFromString(await file.text(),"application/xml");
   const rows=[...doc.querySelectorAll("COLLECTION > TRACK")];
-  const exact=new Map(), loose=new Map();
+  const exact=new Map(), loose=new Map(), base=new Set();
   for(const r of rows){ const name=r.getAttribute("Name"), artist=r.getAttribute("Artist")||"";
     const v={bpm:parseFloat(r.getAttribute("AverageBpm"))||null,key:toCamelot(r.getAttribute("Tonality")),genre:r.getAttribute("Genre")||""};
     for(const a of artist.split(/,|&| feat\.? | ft\.? | x /i).map(x=>x.trim()).filter(Boolean)){
-      exact.set(norm(a)+"|"+norm(name),v); loose.set(normLoose(a)+"|"+normLoose(name),v); } }
-  let hit=0;
+      exact.set(norm(a)+"|"+norm(name),v); const lk=normLoose(a)+"|"+normLoose(name);
+      loose.set(lk+"|"+verKey(name),v); base.add(lk); } }
+  let hit=0, fixed=0;
   for(const t of Object.values(S.tracks)){
     if(S.meta[t.id]?.src==="manual") continue;
     let v=null; for(const a of t.artists){ v=exact.get(norm(a.name)+"|"+norm(t.name)); if(v) break; }
-    if(!v) for(const a of t.artists){ v=loose.get(normLoose(a.name)+"|"+normLoose(t.name)); if(v) break; }
+    // ゆるい照合は「版」が同じときだけ（例: Spotify「Get Busy」と rekordbox「Get Busy (○○ Remix)」は別の曲）
+    let wrongVer=false;
+    if(!v) for(const a of t.artists){ const lk=normLoose(a.name)+"|"+normLoose(t.name); v=loose.get(lk+"|"+verKey(t.name)); if(v) break; if(base.has(lk)) wrongVer=true; }
+    // 以前の取り込みで別の版と取り違えていた値は消して、ReccoBeats／Deezer に取り直させる
+    if(!v && wrongVer && S.meta[t.id]?.src==="rekordbox"){ const {af}=S.meta[t.id]; S.meta[t.id]=af?{af}:{}; delete S.rb[t.id]; fixed++; continue; }
     if(v){ const cur=S.meta[t.id]||{}; const n={...v,src:"rekordbox"};
       if(!n.key && cur.key){ n.key=cur.key; n.kSrc=cur.kSrc||cur.src; } if(!n.bpm && cur.bpm){ n.bpm=cur.bpm; n.bSrc=cur.bSrc||cur.src; } if(!n.genre && cur.genre) n.genre=cur.genre; if(cur.af) n.af=cur.af;
       S.meta[t.id]=n; hit++; }
   }
   await DB.set("meta",S.meta);
-  $("#xmlMsg").textContent=`rekordbox ${rows.length}曲中、Spotifyの曲 ${hit}曲と一致しました`; refresh(); autoSync();
+  $("#xmlMsg").textContent=`rekordbox ${rows.length}曲中、Spotifyの曲 ${hit}曲と一致しました`+(fixed?`（別の版と取り違えていた ${fixed}曲を取り直します）`:""); refresh(); autoSync();
+  if(fixed){ DB.set("rb",S.rb); autoMeta(); }
 }
 
 // ---------- Exportify CSV ----------

@@ -25,7 +25,7 @@ DJ中に「次の曲」を自分のSpotifyライブラリから提案するブ�
 ## BPM・キー・ジャンルの取得経路（src と優先順位）
 `S.meta[id] = {bpm, key(Camelot "8A"等), genre, src, af?}`。`SRC_RANK = manual:4 > rekordbox:3 > exportify:2 = reccobeats:2 > deezer:1 = discogs:1`。上位の src を下位で上書きしない。ただし上位 src でキー／BPMが空の曲は ReccoBeats が空欄だけ埋める（src は据え置き、`kSrc`/`bSrc` に出どころを記録。rekordbox XML は Spotify 配信曲や未解析曲で Tonality が空のことがある）。
 - **manual**: デッキで手入力／TAP
-- **rekordbox**: ライブラリXMLエクスポートを曲名＋アーティストで照合（`importXml`, `norm`/`normLoose`）
+- **rekordbox**: ライブラリXMLエクスポートを曲名＋アーティストで照合（`importXml`, `norm`/`normLoose`）。ゆるい照合（括弧・「 - 」以降を除く）は「版」`verKey()` が同じときだけ（Remix/Edit/Bootleg等は別の曲、Original/Extended/Radio Edit・リマスター・feat. は同じ扱い `VER_NEUTRAL`）。以前の取り込みで別の版と取り違えた rekordbox 値は再取り込み時に消して（af は残す）ReccoBeats/Deezer で取り直す
 - **exportify**: exportify.app のCSV（「Include audio features data」ON）。`Track URI` でID直接照合。Key(0-11)+Mode → Camelot（`PC_MAJ`/`PC_MIN`）。energy等は `meta.af`（`importCsv`）
 - **reccobeats**: `https://api.reccobeats.com/v1/audio-features?ids=`（Spotify曲IDそのまま、最大40件/回、無料・キー不要・CORS可）。tempo/key/mode → bpm・Camelot、energy等 → `meta.af`（`rbFill`, `rbApply`）。照合は返り値の `href` のトラックID。確認済みは IndexedDB "rb"（`S.rb[id]=2` 取得済み／1＝旧形式（特徴量を足すため一度だけ取り直す）／タイムスタンプ＝未登録、30日後に再確認）。特徴量 `RB_FEAT` → af の en/da/va/lo/ac/ins/sp。上位 src の曲も問い合わせ、空欄と af だけ埋める。読み込み後（`autoMeta`）・起動時・`setNow` で自動。収録漏れの曲あり
 - **deezer**: JSONP（`jsonp()`）。ISRC → `/track/isrc:` → 検索フォールバック。BPMのみ（キーなし）。ReccoBeatsで取れなかった曲の補完用。新しい曲は bpm=0 のことが多い。`fillBpm` で一括、`gatherInfo` で曲ごと
@@ -63,7 +63,7 @@ Spotify（人気度・レーベル・リリース・アーティストのジャ�
 - 左右の仕切り `#split`: ドラッグ／←→キーで左ペイン幅（CSS変数 `--side`、240px〜画面幅−380px）。LS `sideW` に保存、ダブルクリックで340pxに戻す。モバイルでは非表示
 - Nowの取り消し: デッキ／モバイルバーの「↶ 戻す」（`data-undo`）とUキー → `undoNow()`
 - 押している最中は描き直さない: `pressing`/`later(fn)`。renderCands・renderDeck・renderInfo は押下中なら離した後に回す（押した要素が差し替わるとクリックが消え「2回押さないと効かない」になるため）。renderCands は HTML が同じなら書き換えない
-- 再生／キュー（`play`/`queue` → `withDevice`）: 404（動いているデバイスなし）なら `/me/player/devices` から開いているSpotify（アクティブ→Computer→Smartphone）を選んで `device_id` 付きで再送。403＝Premiumのみ等は `playErr` で日本語の理由を出す。NOW PLAYING（デッキ）にも ▶ 再生
+- 再生／キュー（`play`/`queue` → `withDevice`）: 404（動いているデバイスなし）なら `/me/player/devices` から開いているSpotify（アクティブ→Computer→Smartphone）を選んで `device_id` 付きで再送。403＝Premiumのみ等は `playErr` で日本語の理由を出す。NOW PLAYING（デッキ）にも ▶ 再生。`toast()` は画面下にも浮かせて出す（#status だけだと押しても反応がないように見えた）
 - DJモード（`setDj`）: 再生／キューボタンを隠し追従を止める
 - モバイル（@media max-width:760px）: 1カラム、`#mobileNow` 固定バー、`<details class="side">` で重み付け／履歴を折りたたみ
 
