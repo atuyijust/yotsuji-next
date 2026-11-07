@@ -53,13 +53,14 @@ Spotify（人気度・レーベル・リリース・アーティストのジャ�
 
 ## 同期・保存
 - IndexedDB "yotsuji-next" store "kv"（`DB.get/set`）: tracks, meta, dz, dg, rb, ex, plIndex。localStorage（`LS`）: cid, tok, now, hist, weights, 各設定
-- GitHub Gist 同期（`syncPush/syncPull/mergeMeta`）: ファイル `yotsuji-next-sync.json`、トークンは LS `ghTok`（UIで入力、コードに書かない）。meta は SRC_RANK の高い方を採用してマージ
+- GitHub Gist 同期（`syncPush/syncPull/mergeMeta`）: ファイル `yotsuji-next-sync.json`、トークンは LS `ghTok`（UIで入力、コードに書かない）。meta は SRC_RANK の高い方を採用してマージ。Client ID（PKCEなので秘密ではない）も載せ、空の端末に入れる
+- 曲データ同期（ユーザー指定「Macと同じデータをiPhoneで」）: 別の非公開Gist `yotsuji-next-library.json`（`findLibGist`/`libPush`/`libPull`）。tracks（配列に詰め、画像URLの共通部分は `~`）・playlists・saved・plIndex・ag・af・rb。大きいので LS `libStamp`（ライブラリが変わった時刻: scan完了・agFillで取得・ReccoBeatsで20曲以上）が `libSent` より新しいときだけ送る。同期データの `libAt` が自分の `libStamp` より新しいときだけ受け取る（受け取ったら trackVer も揃え、全PL読み直しを起こさない）。同期導入前の端末は起動時に libStamp=libAt（最後に読み込んだ時刻）
 
 ## 自動化（「極力自動で」の方針）
 - `autoRefreshLib(force)`: 起動時・画面復帰時・表示中10分おき（30分スロットル、LS `libAt`）にプレイリスト一覧の snapshot_id を比べ、変わったPLだけ `scan({auto:true})`。お気に入りは `/me/tracks?limit=1` の total+先頭ID（LS `savedSig`）が変わったときだけ再取得。設定 `#autoLib`
 - `checkUpdate()`/`maybeReload()`: 公開中 index.html の `<style>`+`<script>` のハッシュを `APP_SIG` と比べ、新版なら `#updBtn` を出し、タブが隠れたとき（DJモード以外は画面復帰時も）に自動リロード。入力中・ダイアログ表示中・読み込み中はしない。設定 `#autoUpd`
 - `tryAutoLogin()`: 一度ログインした端末（LS `hadLogin`）でトークンが切れていたら、タブごとに1回だけ自動で再認証へ（sessionStorage `autoLogin` でループ防止）
-- 再生追従 `follow` は既定ON（DJモード中は止まる）
+- 再生追従 `follow` は既定ON（DJモード中は止まる）。試し聴き中の曲（`S.previewId`）だけ拾わない（previewId が空のときに undefined===undefined で全部無視していたバグに注意）
 - 自動化できないもの: rekordbox XML／Exportify CSV の取り込み（ブラウザはファイルを勝手に読めない）、rekordbox再生中の「Nowへ」
 
 ## UI
@@ -70,6 +71,7 @@ Spotify（人気度・レーベル・リリース・アーティストのジャ�
 - 候補の先頭へ: 下へスクロールすると右下（ユーザー指定）に「↑ 先頭へ」が浮かぶ（`#toTop`、`toTopCheck`）。Homeキーでも。選択も先頭に戻す
 - 押している最中は描き直さない: `pressing`/`later(fn)`。renderCands・renderDeck・renderInfo は押下中なら離した後に回す（押した要素が差し替わるとクリックが消え「2回押さないと効かない」になるため）。renderCands は HTML が同じなら書き換えない
 - 再生／キュー（`play`/`queue` → `withDevice`）: 404（動いているデバイスなし）なら `/me/player/devices` から開いているSpotify（アクティブ→Computer→Smartphone）を選んで `device_id` 付きで再送。403＝Premiumのみ等は `playErr` で日本語の理由を出す。NOW PLAYING（デッキ）にも ▶ 再生。再生ボタンは試し聴きで Now を変えない（ユーザー指定）。`S.previewId` に入れ、再生追従 `poll` もその曲は拾わない（別の曲に変わったら通常の追従に戻る）。指示が通っても Mac の Spotify アプリが曲を読み込まず「無」になることがあるので、`confirmPlay` で `/me/player` の曲を確認 → 違えばアルバム文脈（`context_uri`+`offset`）で再送 → それでもだめなら `spotify:track:` リンクでアプリに曲を開く。`toast()` は画面下にも浮かせて出す（#status だけだと押しても反応がないように見えた）
+- ライブラリ画面: 「選択したプレイリストを読み込む」(`#scan`) はプレイリスト一覧のすぐ下（最下部だと分かりにくい、とユーザー指摘）。横に選択数（`selCount`）、0本なら押せない。下部は「閉じる」だけ
 - DJモード（`setDj`）: 再生／キューボタンを隠し追従を止める
 - モバイル（@media max-width:760px）: 1カラム、`#mobileNow` 固定バー、`<details class="side">` で重み付け／履歴を折りたたみ
 

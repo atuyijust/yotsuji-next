@@ -25,6 +25,7 @@
   button{background:var(--chip);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:5px 10px;font:inherit;cursor:pointer}
   button:hover{border-color:var(--accent)}
   button.pri{background:var(--accent);color:#08110e;border-color:var(--accent);font-weight:600}
+  button:disabled{opacity:.45;cursor:not-allowed}
   button.sm{padding:2px 7px;font-size:11px}
   #updBtn{border-color:var(--accent);color:var(--accent)}
   .modes{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
@@ -246,6 +247,7 @@
     <label class="ck" style="margin-bottom:6px" title="起動時・画面に戻ったとき（30分おき）に、変わったプレイリストだけ読み直します"><input type="checkbox" id="autoLib" checked> プレイリストの変更を自動で取り込む</label>
     <label class="ck" style="margin-bottom:6px" title="新しい版が公開されたら、操作していないときに自動で読み直します"><input type="checkbox" id="autoUpd" checked> 新しい版が出たら自動で更新</label>
     <div id="plList" style="max-height:260px;overflow:auto"></div>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:8px"><button id="scan" class="pri">選択したプレイリストを読み込む</button><span class="muted" id="selCount"></span></div>
     <div class="bar"><i id="prog"></i></div>
     <div class="muted" id="scanMsg"></div>
 
@@ -269,7 +271,7 @@
     <div style="margin-top:6px"><button id="runDz">今すぐBPMを補完</button> <span class="muted" id="dzMsg"></span></div>
 
     <h2>5. 端末間で同期（GitHub Gist）</h2>
-    <p class="muted">BPM・キー・ジャンル・Discogs情報・プレイリストの選択・重み・履歴を、あなたのGitHubの非公開Gistに保存して、MacとiPhoneで共有します。曲データそのものは同期せず、各端末でSpotifyから読み込みます。<br>
+    <p class="muted">BPM・キー・ジャンル・タグ・重み・履歴に加えて、<b>読み込んだ曲データ（プレイリスト・曲・音の特徴・アーティストのジャンル）</b>も、あなたのGitHubの非公開Gistに保存して、MacとiPhoneで共有します。iPhoneは同じトークンを入れるだけで、Spotifyから読み込まなくてもMacと同じ候補が出ます（再生ボタンを使うときだけSpotifyログインが必要）。<br>
     トークンは <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noopener" style="color:var(--accent)">GitHubの設定</a> で「Gists: Read and write」だけ付けて発行してください。この端末のブラウザにだけ保存されます。</p>
     <div style="display:flex;gap:8px;margin-bottom:6px"><input id="ghTok" type="password" placeholder="github_pat_…" style="flex:1;font-family:var(--mono)"><button id="saveTok">保存</button></div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -283,7 +285,6 @@
     <label><button id="metaInBtn">読み込む</button><input type="file" id="metaIn" accept=".json" hidden></label>
   </div>
   <div class="ft">
-    <button id="scan" class="pri">選択したプレイリストを読み込む</button>
     <button id="closeLib">閉じる</button>
   </div>
 </dialog>
@@ -387,7 +388,7 @@ async function loadPlaylistIndex(){
     url = j.next; setStatus(`プレイリスト一覧 ${out.length}件…`); }
   S.plIndex = out; await DB.set("plIndex", out); renderPlList(); setStatus(`プレイリスト ${out.length}件`);
 }
-function renderPlList(){
+function renderPlList(){ setTimeout(selCount,0);
   const f = $("#plFilter").value.trim().toLowerCase();
   const sel = new Set(LS.get("plSel",[]));
   const loaded = new Map(S.playlists.map(p=>[p.id,p]));
@@ -397,7 +398,8 @@ function renderPlList(){
   }).join("") || `<div class="muted">「プレイリスト一覧を取得」を押してください</div>`;
 }
 function saveSel(){ const sel = new Set(LS.get("plSel",[]));
-  $$("#plList input[type=checkbox]").forEach(c=>{ c.checked?sel.add(c.dataset.id):sel.delete(c.dataset.id); }); LS.set("plSel",[...sel]); }
+  $$("#plList input[type=checkbox]").forEach(c=>{ c.checked?sel.add(c.dataset.id):sel.delete(c.dataset.id); }); LS.set("plSel",[...sel]); selCount(); }
+function selCount(){ const n=LS.get("plSel",[]).length; $("#selCount").textContent=n?`${n}本を選択中`:"一覧から選んでください"; $("#scan").disabled=!n; }
 
 async function scan(opt={}){
   if(S.scanning) return; S.scanning=true;
@@ -426,7 +428,7 @@ async function scan(opt={}){
       while(url){ const j=await api(url); if(first){ first=false; LS.set("savedSig",savedSig(j)); } for(const it of j.items||[]){ const t=slimTrack(it.track||it.item); if(t){S.tracks[t.id]=t; ids.push(t.id);} } url=j.next; $("#scanMsg").textContent=`お気に入り ${ids.length}曲…`; await sleep(80); }
       S.saved=ids;
     }
-    LS.set("incSaved",$("#incSaved").checked); LS.set("libAt",Date.now()); LS.set("trackVer",TRACK_VER);
+    LS.set("incSaved",$("#incSaved").checked); LS.set("libAt",Date.now()); LS.set("trackVer",TRACK_VER); libTouch();
     await persist(); buildIndex(); renderPlList();
     $("#scanMsg").textContent=`完了：プレイリスト ${S.playlists.length}本 / 曲 ${Object.keys(S.tracks).length}`;
     refresh();
@@ -780,7 +782,7 @@ async function play(id){ const t=S.tracks[id], uri=t.uri||("spotify:track:"+id);
 let pollTimer=null;
 async function poll(){
   try{ const j=await api("/me/player/currently-playing"); const t=j&&j.item&&slimTrack(j.item);
-    if(t && (t.id===S.previewId || j.item.linked_from?.id===S.previewId)){ S.lastPlayingId=t.id; return; }  // 再生ボタンで試し聴き中の曲
+    if(t && S.previewId && (t.id===S.previewId || j.item.linked_from?.id===S.previewId)){ S.lastPlayingId=t.id; return; }  // 再生ボタンで試し聴き中の曲
     if(t) S.previewId=null;  // 試し聴きの曲から別の曲に変わったら、通常の追従に戻す
     if(t && t.id!==S.lastPlayingId){ S.lastPlayingId=t.id; if(!S.tracks[t.id]) S.tracks[t.id]=t; if(t.id!==S.now) setNow(t.id); } }
   catch(e){ setStatus("追従エラー："+e.message); }
@@ -857,7 +859,7 @@ async function rbFill(ids, quiet){
       await sleep(250);
     }
   } finally {
-    rbRunning=false; await DB.set("meta",S.meta); await DB.set("rb",S.rb);
+    rbRunning=false; await DB.set("meta",S.meta); await DB.set("rb",S.rb); if(got>=20) libTouch();  // まとめて取れたら曲データの同期対象に（1曲ずつでは送らない）
     if(!quiet) setStatus(`ReccoBeats：${n}曲を確認し ${got}曲にBPM・キーを付けました`);
     if($("#rbMsg")) $("#rbMsg").textContent=`前回：${n}曲を確認し ${got}曲に付与`;
     if(got){ if(S.now && todo.includes(S.now)) renderDeck(); renderCands(true); if(S.now) renderInfo(); }
@@ -883,7 +885,7 @@ async function agFill(){ if(agRunning || !(await token())) return 0; agRunning=t
       for(const a of j.artists||[]) if(a?.id){ S.ag[a.id]={g:a.genres||[],at:now}; if(a.genres?.length) got++; }
       if(ids.length>100) setStatus(`アーティストのジャンルを取得中… ${Math.min(i+50,ids.length)}/${ids.length}`);
       if(i%500===450){ DB.set("ag",S.ag); renderCands(true); } await sleep(150); }
-    await DB.set("ag",S.ag); if(ids.length){ renderCands(true); renderDeck(); if(ids.length>100) setStatus(`アーティストのジャンル：${got}組を取得しました`); }
+    await DB.set("ag",S.ag); if(got){ libTouch(); autoSync(); } if(ids.length){ renderCands(true); renderDeck(); if(ids.length>100) setStatus(`アーティストのジャンル：${got}組を取得しました`); }
   }finally{ agRunning=false; } return got; }
 async function autoMeta(){
   let got=0;
@@ -1144,11 +1146,43 @@ async function findGist(){ let id=LS.get("gistId",""); if(id){ const r=await gh(
   for(let p=1;p<=5;p++){ const r=await gh("/gists?per_page=100&page="+p); const j=await r.json(); if(!j.length) break;
     const g=j.find(x=>x.files&&x.files[SYNC_FILE]); if(g){ LS.set("gistId",g.id); return g.id; } }
   return null; }
+// ---------- 曲データ（ライブラリ）の同期: 別の非公開Gist「yotsuji-next-library.json」 ----------
+// 曲・プレイリスト・お気に入り・アーティストのジャンル・音の特徴(af)を入れる。大きい（数MB）ので、変わったときだけ送り、
+// 相手のほうが新しいとき（同期データの libAt で判断）だけ受け取る。これで iPhone は Spotify から読み込まなくても Mac と同じ候補が出る
+const LIB_FILE="yotsuji-next-library.json", IMG_PRE="https://i.scdn.co/image/";
+async function findLibGist(){ let id=LS.get("libGistId",""); if(id){ const r=await gh("/gists/"+id); if(r.ok) return id; }
+  for(let p=1;p<=5;p++){ const r=await gh("/gists?per_page=100&page="+p); const j=await r.json(); if(!j.length) break;
+    const g=j.find(x=>x.files&&x.files[LIB_FILE]); if(g){ LS.set("libGistId",g.id); return g.id; } }
+  return null; }
+function libTouch(){ LS.set("libStamp",Date.now()); }
+function libPayload(){
+  const T=Object.values(S.tracks).map(t=>[t.id,t.name,t.artists.map(a=>[a.id,a.name]),t.album,t.albumId||"",t.dur||0,t.isrc||"",(t.img||"").replace(IMG_PRE,"~"),t.pop??null,t.year||null]);
+  const af={}; for(const [id,m] of Object.entries(S.meta)) if(m.af){ const o={}; for(const [k,v] of Object.entries(m.af)) if(typeof v==="number") o[k]=Math.round(v*1000)/1000; af[id]=o; }
+  return {v:1, at:LS.get("libStamp",0), tracks:T, playlists:S.playlists, saved:S.saved, plIndex:S.plIndex, ag:S.ag, af, rb:S.rb}; }
+async function libPush(){ const stamp=LS.get("libStamp",0); if(!stamp || stamp<=LS.get("libSent",0) || !Object.keys(S.tracks).length) return;
+  syncMsg("同期：曲データを送信中…"); const id=await findLibGist();
+  const body={description:"四辻 NEXT 曲データ",public:false,files:{[LIB_FILE]:{content:JSON.stringify(libPayload())}}};
+  const r=await gh(id?"/gists/"+id:"/gists",{method:id?"PATCH":"POST",body:JSON.stringify(body)}); const j=await r.json(); if(j.id) LS.set("libGistId",j.id);
+  LS.set("libSent",stamp); }
+async function libPull(){ const id=await findLibGist(); if(!id) return 0;
+  syncMsg("同期：曲データを受信中…");
+  const g=await (await gh("/gists/"+id)).json(); const f=g.files?.[LIB_FILE]; if(!f) return 0;
+  const d=JSON.parse(f.truncated ? await (await fetch(f.raw_url)).text() : f.content);
+  if(!(d.at>LS.get("libStamp",0))) return 0;
+  for(const r of d.tracks||[]){ const [id,name,ar,album,albumId,dur,isrc,img,pop,year]=r;
+    S.tracks[id]={id,uri:"spotify:track:"+id,name,artists:ar.map(([id,name])=>({id,name})),album,albumId,dur,isrc,img:(img||"").replace(/^~/,IMG_PRE),pop,year}; }
+  S.playlists=d.playlists||S.playlists; S.saved=d.saved||S.saved; if(d.plIndex?.length) S.plIndex=d.plIndex;
+  for(const [aid,v] of Object.entries(d.ag||{})) if(!S.ag[aid] || (v.at||0)>(S.ag[aid].at||0)) S.ag[aid]=v;
+  for(const [id,a] of Object.entries(d.af||{})){ const m=S.meta[id]||(S.meta[id]={}); m.af={...a,...(m.af||{})}; }
+  for(const [id,v] of Object.entries(d.rb||{})) if(!(id in S.rb)) S.rb[id]=v;
+  await persist(); await DB.set("ag",S.ag); await DB.set("rb",S.rb); await DB.set("plIndex",S.plIndex); buildIndex();
+  LS.set("libStamp",d.at); LS.set("libSent",d.at); LS.set("trackVer",TRACK_VER); LS.set("libAt",Date.now());
+  return (d.tracks||[]).length; }
 function syncPayload(){
   const meta={}; for(const [id,m] of Object.entries(S.meta)){ if(m.bpm||m.key||m.genre||m.rbBad) meta[id]={bpm:m.bpm||0,key:m.key||"",genre:m.genre||"",src:m.src||"",...(m.rbBad?{rbBad:1}:{})}; }
   const dg={}; for(const [id,v] of Object.entries(S.dg)) if(v) dg[id]=v;
   return {v:1, at:Date.now(), meta, dg, dz:S.dz, plSel:LS.get("plSel",[]), incSaved:LS.get("incSaved",false), dj:LS.get("dj",false), copyMode:LS.get("copyMode","title"),
-    weights:Object.fromEntries(["wFlow","wCo","wBpm","wKey","wGen","wYear"].map(k=>[k,LS.get(k,null)])), hist:S.hist, now:S.now, tags:S.tags}; }
+    weights:Object.fromEntries(["wFlow","wCo","wBpm","wKey","wGen","wYear"].map(k=>[k,LS.get(k,null)])), hist:S.hist, now:S.now, tags:S.tags, libAt:LS.get("libSent",0), cid:LS.get("cid","")}; }
 const SRC_RANK={manual:4,rekordbox:3,exportify:2,reccobeats:2,deezer:1,discogs:1,"":0};
 const SRC_LABEL={deezer:"Deezer",rekordbox:"rekordbox",exportify:"Exportify",reccobeats:"ReccoBeats",manual:"手入力",discogs:"Discogs"};
 function mergeMeta(remote){
@@ -1172,6 +1206,7 @@ async function syncPush(){
   try{ syncMsg("同期：送信中…"); let id=await findGist();
     // 送る前に受け取って合成（上書き事故を防ぐ）
     if(id){ const g=await (await gh("/gists/"+id)).json(); const f=g.files[SYNC_FILE]; if(f){ let txt=f.content; if(f.truncated) txt=await (await fetch(f.raw_url)).text(); try{ mergeMeta(JSON.parse(txt)); }catch{} } }
+    await libPush();
     const body={description:"四辻 NEXT 同期データ",public:false,files:{[SYNC_FILE]:{content:JSON.stringify(syncPayload())}}};
     const r=await gh(id?"/gists/"+id:"/gists",{method:id?"PATCH":"POST",body:JSON.stringify(body)}); const j=await r.json(); LS.set("gistId",j.id); LS.set("lastSync",Date.now());
     await DB.set("meta",S.meta); await DB.set("dg",S.dg); await DB.set("dz",S.dz);
@@ -1184,12 +1219,14 @@ async function syncPull(applySettings){
   try{ syncMsg("同期：受信中…"); const id=await findGist(); if(!id){ syncMsg("同期：まだデータがありません（この端末から「今すぐ送る」）"); return; }
     const g=await (await gh("/gists/"+id)).json(); const f=g.files[SYNC_FILE]; let txt=f.content; if(f.truncated) txt=await (await fetch(f.raw_url)).text();
     const d=JSON.parse(txt); const n=mergeMeta(d);
+    let nl=0; if((d.libAt||0)>LS.get("libStamp",0)) nl=await libPull();
+    if(d.cid && !LS.get("cid","")) LS.set("cid",d.cid);
     if(applySettings){ if(d.plSel&&!LS.get("plSel",[]).length) LS.set("plSel",d.plSel); if(d.incSaved!=null&&LS.get("incSaved",null)==null) LS.set("incSaved",d.incSaved);
       for(const [k,v] of Object.entries(d.weights||{})) if(v!=null && LS.get(k,null)==null) LS.set(k,v);
       if(d.copyMode && !localStorage.getItem("copyMode")) LS.set("copyMode",d.copyMode);
       if(!S.hist.length && d.hist?.length){ S.hist=d.hist; LS.set("hist",S.hist); } if(!S.now && d.now){ S.now=d.now; LS.set("now",S.now); } }
     await DB.set("meta",S.meta); await DB.set("dg",S.dg); await DB.set("dz",S.dz); LS.set("lastSync",Date.now());
-    syncMsg(`同期：受信しました（${n}曲を更新）`); refresh(); }
+    syncMsg(`同期：受信しました（${nl?`曲データ ${nl}曲・`:""}${n}曲のBPM等を更新）`); refresh(); renderTagFilter(); }
   catch(e){ syncMsg("同期エラー："+e.message); }
   finally{ syncing=false; }
 }
@@ -1402,7 +1439,9 @@ $("#autoInfo").checked=LS.get("autoInfo",true); $("#autoInfo").onchange=e=>{ LS.
   if(!S.playlists.length && !LS.get("cid","")) openLib();
   refresh();
   if(S.now && LS.get("autoInfo",true)) gatherInfo(S.now);
-  if(LS.get("autoSync",true) && LS.get("ghTok","")) await syncPull(true);
+  // 曲データ同期を入れる前から使っている端末: 最後に読み込んだ時刻を曲データの時刻にする（新しく読み込んだ端末の方が勝つ）
+  if(!LS.get("libStamp",0) && Object.keys(S.tracks).length) LS.set("libStamp",LS.get("libAt",1));
+  if(LS.get("autoSync",true) && LS.get("ghTok","")){ await syncPull(true); autoSync(); }
   if(authed) await autoRefreshLib(true);
   if(LS.get("autoRb",true) && !S.scanning) rbFill().then(g=>{ if(g) autoSync(); });
   if(authed && !S.scanning) agFill();
