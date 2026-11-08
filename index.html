@@ -85,6 +85,8 @@
   .chip.r{color:var(--warn);border-color:#4a2c2c}
   .chip.tag{color:#c9b8ff;border-color:#3d3560}
   .tags{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-top:8px}
+  .tagPre{margin-top:6px;font-size:12px} .tagPre summary{cursor:pointer;color:var(--dim)} .tagPre .tpg{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-top:5px}
+  .tagPre .tpg>.muted{width:44px;flex:none} .tagPre .chip{cursor:pointer}
   .tags .chip{font-size:12px;padding:1px 8px}
   .tags .chip button{background:none;border:0;color:inherit;cursor:pointer;padding:0 0 0 4px;font-size:12px}
   .tags input{width:9em;font-size:12px;padding:3px 6px}
@@ -525,7 +527,7 @@ function genOf(id){ return (S.meta[id]?.genre||"").toLowerCase().split(/[\/,;]/)
 const MODES={
   flow:    {label:"いつもの流れ", tip:"自分のプレイリストで並べた順を重視",                      m:{flow:1,   co:1,   bpm:1,key:1,gen:1,  af:0, nov:0, rnd:0,  pop:0, eng:0}},
   similar: {label:"似た曲",       tip:"音の特徴（エネルギー・ダンス度・明るさ・生音っぽさ・インスト度・ボーカル量・音量をライブラリ内で比較）とジャンルから見て雰囲気が近い曲",            m:{flow:.3,  co:.6,  bpm:1,key:1,gen:1.5,af:3, nov:0, rnd:0,  pop:0, eng:0}},
-  surprise:{label:"ジャンル越え", tip:"ジャンルは違うけど、BPM・キー・音の感じ（エネルギー・ダンス度など）がつながる曲。🎲で入れ替え", m:{flow:0, co:0, bpm:1,key:1,gen:0, af:0,nov:0, rnd:.5,pop:0, eng:0, cross:2.5, snd:2}},
+  surprise:{label:"ジャンル越え", tip:"今の曲とジャンルが全く重ならない曲だけ（同じ・近いジャンルは出さない）。その中でBPM・キー・音の感じがつながる順。🎲で入れ替え", m:{flow:0, co:0, bpm:1,key:1,gen:0, af:0,nov:0, rnd:.5,pop:0, eng:0, cross:2.5, snd:1}},
   up:      {label:"上げる",       tip:"今よりエネルギーが少し高い曲",                              m:{flow:.5,  co:.5,  bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0,  pop:0, eng:3}},
   down:    {label:"落とす",       tip:"今よりエネルギーが少し低い曲",                              m:{flow:.5,  co:.5,  bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0,  pop:0, eng:3}},
 };
@@ -613,8 +615,9 @@ function suggest(){
     else if(fK && curKey) continue;
     // ジャンル: 曲のジャンル＋アーティストのSpotifyジャンルで比べる。両方分かっていて全く重ならなければ減点
     const gSet=genreSet(id,lm), gs=genreSim(vctx.curG,gSet); let gst=null;
-    // ジャンル越え: ジャンルが違う（両方分かっている）ほど加点、同じジャンルは加点なし。音の感じが近いほど加点
-    if(W.cross && gs!=null){ const v=gs===0?1:gs<.5?.5:0; sc+=W.cross*v; if(v) gst=[v===1?"g":"y","ジャンル越え"]; }
+    // ジャンル越え: 今の曲のジャンルが分かっていれば、同じ・近いジャンル（単語や大きな括りが重なる）は候補から外す。
+    // 全く重ならない曲だけ加点、ジャンル不明の曲は下のほうへ。音の感じが近いほど加点
+    if(W.cross && vctx.curG.size){ if(gs==null) sc-=W.cross*.6; else if(gs>0) continue; else { sc+=W.cross; gst=["g","ジャンル越え"]; } }
     if(W.snd){ const sd=afSim(curAf,afOf(id),vctx.st); if(sd!=null){ sc+=W.snd*(sd-.4)*2; if(sd>=.55) chips.push([sd>=.7?"g":"y",`音の感じ ${Math.round(sd*100)}%`]); } }
     if(gs!=null && W.gen){ if(gs>0){ sc+=W.gen*gs; if(!gst) gst=[gs>=1?"g":"y", gs>=1?"同じジャンル":"近いジャンル"]; } else { sc-=W.gen*2; if(!gst) gst=["r","ジャンル違い"]; } }
     const af=afOf(id);
@@ -661,9 +664,12 @@ function renderDeck(force){
   $("#deck").innerHTML=`<div class="row"><img src="${esc(t.img)}" alt=""><div><div class="t">${esc(t.name)}</div><div class="a">${esc(arts(t))}</div>${(()=>{ const gl=genreList(t.id,labelMap()); return gl.length?`<div class="gps">${gl.slice(0,4).map(x=>genrePill(x,true)).join("")}</div>`:""; })()}<div class="muted">${esc(t.album)} ${t.year||""}</div></div></div>
    <div class="bk"><span class="big">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="muted">BPM</span><span class="big k">${m.key||"—"}</span><span class="muted">${m.genre?esc(m.genre):""} ${m.src?"("+(SRC_LABEL[m.src]||m.src)+(m.kSrc&&m.kSrc!==m.src?" / キー: "+(SRC_LABEL[m.kSrc]||m.kSrc):"")+(m.bSrc&&m.bSrc!==m.src?" / BPM: "+(SRC_LABEL[m.bSrc]||m.bSrc):"")+")":""}${m.src==="rekordbox"&&m.rbName&&norm(m.rbName)!==norm(t.name)?` <span class="muted" title="rekordbox のこの曲と照合しました">← rekordbox「${esc(m.rbName)}」</span>`:""}</span></div>
    <div class="bk"><input id="eBpm" placeholder="BPM" value="${m.bpm||""}"><input id="eKey" placeholder="キー 8A/Am" value="${m.key||""}"><button class="sm" id="saveMeta">保存</button><button class="sm" id="tap">TAP</button><button class="sm" data-p="${t.id}" title="Spotifyで再生">▶ 再生</button><button class="sm" data-c="${t.id}" title="曲名をコピー">⎘ コピー</button>${undo}<span class="muted" id="tapv"></span></div>
-   <div class="tags" id="deckTags">${tagsOf(t.id).map(x=>`<span class="chip tag">#${esc(x)}<button data-deltag="${esc(x)}" title="外す">×</button></span>`).join("")}<input id="tagIn" placeholder="＋タグ（T）" list="tagList" autocomplete="off"><datalist id="tagList">${allTags().map(x=>`<option value="${esc(x)}">`).join("")}</datalist>${allTags().filter(x=>!tagsOf(t.id).includes(x)).slice(0,6).map(x=>`<span class="chip sug" data-addtag="${esc(x)}" title="このタグを付ける">＋${esc(x)}</span>`).join("")}</div>`;
+   <div class="tags" id="deckTags">${tagsOf(t.id).map(x=>`<span class="chip tag">#${esc(x)}<button data-deltag="${esc(x)}" title="外す">×</button></span>`).join("")}<input id="tagIn" placeholder="＋タグ（T）" list="tagList" autocomplete="off"><datalist id="tagList">${[...new Set([...allTags(),...PRESET_ALL])].map(x=>`<option value="${esc(x)}">`).join("")}</datalist>${allTags().filter(x=>!tagsOf(t.id).includes(x)).slice(0,6).map(x=>`<span class="chip sug" data-addtag="${esc(x)}" title="このタグを付ける">＋${esc(x)}</span>`).join("")}</div>
+   <details class="tagPre" id="tagPre"${LS.get("tagPre",false)?" open":""}><summary>定番タグから選ぶ</summary>${TAG_PRESET.map(([g,l])=>`<div class="tpg"><span class="muted">${g}</span>${l.map(x=>tagsOf(t.id).includes(x)?`<span class="chip tag g" data-deltag="${esc(x)}" title="外す">#${esc(x)}</span>`:`<span class="chip sug" data-addtag="${esc(x)}" title="このタグを付ける">＋${esc(x)}</span>`).join("")}</div>`).join("")}</details>`;
   $("#tagIn").onkeydown=e=>{ if(e.isComposing||e.keyCode===229) return;  // 日本語変換の確定Enterでは追加しない
     if(e.key==="Enter"){ e.preventDefault(); const v=e.target.value; if(cleanTag(v)){ addTag(t.id,v); setTimeout(()=>$("#tagIn")?.focus(),0); } } else if(e.key==="Escape"){ e.target.value=""; e.target.blur(); } };
+  $("#tagPre").ontoggle=e=>LS.set("tagPre",e.target.open);
+  $("#tagPre").onclick=e=>{ const d=e.target.closest("[data-deltag]"), a=e.target.closest("[data-addtag]"); if(d) delTag(t.id,d.dataset.deltag); else if(a) addTag(t.id,a.dataset.addtag); };
   $("#deckTags").onclick=e=>{ const d=e.target.closest("[data-deltag]"), a=e.target.closest("[data-addtag]"); if(d) delTag(t.id,d.dataset.deltag); else if(a) addTag(t.id,a.dataset.addtag); };
   $("#saveMeta").onclick=()=>{ const bpm=parseFloat($("#eBpm").value)||null; const kRaw=$("#eKey").value.trim(); const key=toCamelot(kRaw);
     if(kRaw && !key){ toast("キーは 8A や Am の形で入力してください"); return; }
@@ -721,6 +727,13 @@ function renderCands(keepSel){
 }
 // ---------- タグ（自分で付ける。例: ピーク・朝方・ボーカル） ----------
 const tagsOf=id=>S.tags[id]?.t||[];
+// 最初から用意しておく定番タグ（DJがフォルダ／マイタグ分けに使う区分: 時間帯・役割・音の要素・ムード・版）
+const TAG_PRESET=[["時間帯",["Opener","Warm Up","Build Up","Peak Time","Closing","After Hours"]],
+  ["役割",["Banger","Anthem","Tool","Transition","Cool Down","Singalong"]],
+  ["要素",["Vocal","Instrumental","Acapella","Female Vox","Male Vox","Rap","Long Intro","Big Drop"]],
+  ["ムード",["Dark","Groovy","Euphoric","Emotional","Chill","Funky","Hard","Deep"]],
+  ["版",["Edit","Remix","Mashup","Bootleg","Classic","New"]]];
+const PRESET_ALL=TAG_PRESET.flatMap(([,l])=>l);
 const cleanTag=x=>String(x||"").replace(/^#/,"").replace(/\s+/g," ").trim().slice(0,24);
 function allTags(){ const n={}; for(const v of Object.values(S.tags)) for(const t of v.t||[]) n[t]=(n[t]||0)+1; return Object.entries(n).sort((a,b)=>b[1]-a[1]).map(x=>x[0]); }
 function setTags(id,list){ const t=[...new Set(list.map(cleanTag).filter(Boolean))]; S.tags[id]={t,at:Date.now()}; DB.set("tags",S.tags); renderTagFilter(); refresh(); renderDeck(true); autoSync(); }
