@@ -45,7 +45,7 @@ DJ中に「次の曲」を自分のSpotifyライブラリから提案するブ�
 - af（energy等）は ReccoBeats／Exportify 由来。無い曲は雰囲気・エネルギーの加点なし
 
 ## タグ（自分で付ける）
-`S.tags[id]={t:[...],at}`（IndexedDB "tags"、Gist同期は `at` が新しい方が勝つ）。デッキの「＋タグ」欄（Tキー、Enterで追加、日本語変換中のEnterは無視、×で外す、よく使うタグを「＋」で1クリック）。定番タグ `TAG_PRESET`（時間帯 Opener〜After Hours／役割 Banger・Tool等／要素 Vocal等／ムード／版 Edit・Remix等、ユーザー指定「プロDJのフォルダ分けのようなタグをデフォルトで」）をデッキの「定番タグから選ぶ」（`#tagPre`、開閉は LS `tagPre`）で1クリック付け外し、入力候補にも入る。候補行にタグのチップ（今の曲と同じタグは緑）、同じタグ1つにつき +1.5（2つまで）。候補欄の「タグ」で絞り込み（LS `fTag`）。デッキの入力欄に入力中は `renderDeck` を止め、離れたら描き直す（`renderDeck(true)` で強制）。
+`S.tags[id]={t:[...],at}`（IndexedDB "tags"、Gist同期は `at` が新しい方が勝つ）。デッキの「＋タグ」欄（Tキー、Enterで追加、日本語変換中のEnterは無視、×で外す、よく使うタグを「＋」で1クリック）。定番タグ `TAG_PRESET`（時間帯 Opener〜After Hours／役割 Banger・Tool等／要素 Vocal等／ムード／版 Edit・Remix等、ユーザー指定「プロDJのフォルダ分けのようなタグをデフォルトで」）をデッキの「定番タグから選ぶ」（`#tagPre`、開閉は LS `tagPre`）で1クリック付け外し、入力候補にも入る。候補の曲にも付けられる（ユーザー指定）: 候補行の「＃」かタグのチップを押すと小窓 `#tagPop`（`openTagPop`/`renderTagPop`、候補欄の外に fixed で置くので描き直しでも閉じない。入力欄・自分のタグ・定番タグ、Esc／外側クリックで閉じる）。候補行にタグのチップ（今の曲と同じタグは緑）、同じタグ1つにつき +1.5（2つまで）。候補欄の「タグ」で絞り込み（LS `fTag`）。デッキの入力欄に入力中は `renderDeck` を止め、離れたら描き直す（`renderDeck(true)` で強制）。
 
 ## 曲情報の自動収集（`gatherInfo(id)` → `S.ex[id]`, IndexedDB "ex", 14日キャッシュ）
 Spotify（人気度・レーベル・リリース・アーティストのジャンル／フォロワー・トップ曲・別バージョン検索）／Deezer（BPM・ゲイン・ランク・アルバム）／MusicBrainz（ISRC→recording、タグ・初リリース、1req/秒。`mbLinks()` でサンプリング元／この曲をサンプリングした曲／リミックス元／カバー。関係は録音ごとに登録されるので、DJミックス内の録音を除き収録リリースの多い順に最大4録音を見て合算）／Wikipedia REST summary（ja→en、音楽系記事のみ、かつ返ってきた記事名がアーティスト名と一致するときだけ採用＝別ページへの転送を弾く）／Discogs。キャッシュは `EX_VER` が変わると取り直す。WhoSampled は公開APIがないので使わない。

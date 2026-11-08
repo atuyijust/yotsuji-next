@@ -86,6 +86,10 @@
   .chip.r{color:var(--warn);border-color:#4a2c2c}
   .chip.tag{color:#c9b8ff;border-color:#3d3560}
   .tags{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-top:8px}
+  #tagPop{position:fixed;z-index:60;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;box-shadow:0 8px 28px rgba(0,0,0,.55);max-height:70vh;overflow:auto;font-size:12px}
+  #tagPop .tph{display:flex;justify-content:space-between;align-items:center;gap:8px} #tagPop .tags{margin-top:6px} #tagPop .chip{cursor:pointer}
+  #tagPop .tpg{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-top:5px} #tagPop .tpg>.muted{width:44px;flex:none}
+  .cand .chip.tag{cursor:pointer}
   .tagPre{margin-top:6px;font-size:12px} .tagPre summary{cursor:pointer;color:var(--dim)} .tagPre .tpg{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-top:5px}
   .tagPre .tpg>.muted{width:44px;flex:none} .tagPre .chip{cursor:pointer}
   .tags .chip{font-size:12px;padding:1px 8px}
@@ -238,6 +242,7 @@
       <span class="muted" id="candInfo"></span>
       <span class="keys"><b>↑↓</b> 選択 <b>Enter</b> Nowへ <b>/</b> 検索 <b>C</b> 曲名コピー <b>U</b> 取り消し <b>T</b> タグ <b>M</b> 選び方</span>
     </div>
+    <div id="tagPop" hidden role="dialog" aria-label="タグを付ける"></div>
     <button id="toTop" title="候補の先頭へ（Home）" aria-label="候補の先頭へ">↑ 先頭へ</button>
     <div id="cands"><div class="empty">ライブラリを読み込み、Now Playingを決めると候補が並びます。</div></div>
   </section>
@@ -791,7 +796,7 @@ function renderCands(keepSel){
     return `<div class="cand${i===sel?" sel":""}" data-i="${i}" data-id="${c.id}"><span class="sc" title="全部の条件が揃ったときを100とした点">${list.weak?"—":c.pct}</span><img src="${esc(t.img)}" alt="" loading="lazy">
       <div><div class="nm">${esc(t.name)}${(()=>{ const gl=genreList(c.id,lm); return (gl.length?gl.slice(0,3).map(x=>genrePill(x)).join(""):`<span class="gp none" title="ジャンル不明">？</span>`)+(c.gst?`<span class="gj ${c.gst[0]}">${c.gst[1]}</span>`:""); })()}</div><div class="muted">${esc(arts(t))}</div>${subLine(c.id,lm,c.yv)}<div class="chips">${c.chips.map(([k,x])=>`<span class="chip ${k}">${esc(x)}</span>`).join("")}</div></div>
       <span class="meta">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="meta" style="color:var(--accent2)">${m.key||"—"}</span>
-      <span class="acts"><button class="sm" data-c="${c.id}" title="曲名をコピー（rekordboxの検索に貼り付け）">⎘</button><button class="sm" data-q="${c.id}">キュー</button><button class="sm" data-p="${c.id}">再生</button><button class="sm" data-n="${c.id}">Nowへ</button></span></div>`; }).join("");
+      <span class="acts"><button class="sm" data-tagbtn="${c.id}" title="この曲にタグを付ける">＃</button><button class="sm" data-c="${c.id}" title="曲名をコピー（rekordboxの検索に貼り付け）">⎘</button><button class="sm" data-q="${c.id}">キュー</button><button class="sm" data-p="${c.id}">再生</button><button class="sm" data-n="${c.id}">Nowへ</button></span></div>`; }).join("");
   let html=(list.weak?`<div class="empty" style="padding:8px 0">今の曲の手がかり（BPM・キー・プレイリスト・音の特徴）が少ないので、参考として並べています。BPM／キーを入れるか、この曲を含むプレイリストを読み込むと精度が上がります。</div>`:"")+rows;
   const rest=list.length-top.length;
   if(rest>0) html+=`<div class="more"><button class="sm" id="moreCands">もっと見る（+${Math.min(60,rest)}曲 / 残り${rest}曲）</button></div>`;
@@ -808,9 +813,33 @@ const TAG_PRESET=[["時間帯",["Opener","Warm Up","Build Up","Peak Time","Closi
 const PRESET_ALL=TAG_PRESET.flatMap(([,l])=>l);
 const cleanTag=x=>String(x||"").replace(/^#/,"").replace(/\s+/g," ").trim().slice(0,24);
 function allTags(){ const n={}; for(const v of Object.values(S.tags)) for(const t of v.t||[]) n[t]=(n[t]||0)+1; return Object.entries(n).sort((a,b)=>b[1]-a[1]).map(x=>x[0]); }
-function setTags(id,list){ const t=[...new Set(list.map(cleanTag).filter(Boolean))]; S.tags[id]={t,at:Date.now()}; DB.set("tags",S.tags); renderTagFilter(); refresh(); renderDeck(true); autoSync(); }
+function setTags(id,list){ const t=[...new Set(list.map(cleanTag).filter(Boolean))]; S.tags[id]={t,at:Date.now()}; DB.set("tags",S.tags); renderTagFilter(); refresh(); renderDeck(true); if(tagPopId===id) renderTagPop(); autoSync(); }
 function addTag(id,x){ const t=cleanTag(x); if(!t||tagsOf(id).includes(t)) return; setTags(id,[...tagsOf(id),t]); }
 function delTag(id,x){ setTags(id,tagsOf(id).filter(t=>t!==x)); }
+// 候補の曲にタグを付ける小窓（候補の「＃」か、候補のタグのチップを押すと開く）。候補欄の外に置くので、描き直しても閉じない
+let tagPopId=null, tagPopAnchor=null;
+function openTagPop(id,anchor){ tagPopId=id; tagPopAnchor=anchor; const el=$("#tagPop"); el.hidden=false; renderTagPop(); placeTagPop(); setTimeout(()=>$("#tagPopIn")?.focus(),0); }
+function placeTagPop(){ const el=$("#tagPop"), a=tagPopAnchor; if(el.hidden||!a) return; const r=a.getBoundingClientRect(), w=Math.min(360,innerWidth-16);
+  el.style.width=w+"px"; el.style.left=Math.max(8,Math.min(r.right-w,innerWidth-w-8))+"px"; const h=el.offsetHeight;
+  el.style.top=(r.bottom+6+h>innerHeight ? Math.max(8,r.top-6-h) : r.bottom+6)+"px"; }
+function closeTagPop(){ tagPopId=null; tagPopAnchor=null; $("#tagPop").hidden=true; }
+function renderTagPop(){ const id=tagPopId, t=S.tracks[id]; if(!t){ closeTagPop(); return; }
+  const cur=tagsOf(id), inp=$("#tagPopIn"), val=inp?.value||"", had=document.activeElement===inp;
+  const chip=x=>cur.includes(x)?`<span class="chip tag g" data-tpdel="${esc(x)}" title="外す">#${esc(x)}</span>`:`<span class="chip sug" data-tpadd="${esc(x)}" title="このタグを付ける">＋${esc(x)}</span>`;
+  const used=allTags().filter(x=>!cur.includes(x)&&!PRESET_ALL.includes(x)).slice(0,10);
+  $("#tagPop").innerHTML=`<div class="tph"><b>${esc(cut(t.name,38))}</b><button class="sm" data-tpclose title="閉じる（Esc）">×</button></div>
+   <div class="tags">${cur.map(x=>`<span class="chip tag">#${esc(x)}<button data-tpdel="${esc(x)}" title="外す">×</button></span>`).join("")}<input id="tagPopIn" placeholder="＋タグ（Enter）" list="tagList" autocomplete="off"></div>
+   ${used.length?`<div class="tpg"><span class="muted">自分の</span>${used.map(chip).join("")}</div>`:""}
+   ${TAG_PRESET.map(([g,l])=>`<div class="tpg"><span class="muted">${g}</span>${l.map(chip).join("")}</div>`).join("")}`;
+  const ni=$("#tagPopIn"); ni.value=val; if(had) ni.focus();
+  ni.onkeydown=e=>{ if(e.isComposing||e.keyCode===229) return; e.stopPropagation();
+    if(e.key==="Enter"){ e.preventDefault(); const v=cleanTag(ni.value); if(v){ ni.value=""; addTag(id,v); setTimeout(()=>$("#tagPopIn")?.focus(),0); } }
+    else if(e.key==="Escape"){ e.preventDefault(); closeTagPop(); } }; }
+$("#tagPop").addEventListener("click",e=>{ e.stopPropagation(); const id=tagPopId; if(!id) return;
+  const a=e.target.closest("[data-tpadd]"), d=e.target.closest("[data-tpdel]");
+  if(e.target.closest("[data-tpclose]")) closeTagPop(); else if(a) addTag(id,a.dataset.tpadd); else if(d) delTag(id,d.dataset.tpdel); });
+document.addEventListener("keydown",e=>{ if(e.key==="Escape" && tagPopId){ closeTagPop(); } });
+window.addEventListener("resize",()=>placeTagPop());
 function renderTagFilter(){ const el=$("#fTag"); if(!el) return; const cur=LS.get("fTag",""), all=allTags();
   el.innerHTML=`<option value="">すべて</option>`+all.map(t=>`<option${t===cur?" selected":""}>${esc(t)}</option>`).join("")+(cur&&!all.includes(cur)?`<option selected>${esc(cur)}</option>`:"");
   el.closest("label").hidden=!all.length && !cur; }
@@ -1445,6 +1474,10 @@ function openLyrics(id){ const t=S.tracks[id]; if(!t) return; const nm=t.name.re
 document.addEventListener("click",e=>{
   if(e.target.closest("[data-undo]")){ undoNow(); return; }
   const ly=e.target.closest("[data-lyr]"); if(ly){ openLyrics(ly.dataset.lyr); return; }
+  const tb=e.target.closest("[data-tagbtn]"), tc=!tb && e.target.closest(".cand .chip.tag");
+  if(tb||tc){ const id=tb?tb.dataset.tagbtn:tc.closest(".cand")?.querySelector("[data-tagbtn]")?.dataset.tagbtn;
+    if(id){ if(tagPopId===id && tb) closeTagPop(); else openTagPop(id,tb||tc); } return; }
+  if(tagPopId && !e.target.closest("#tagPop")) closeTagPop();
   if(e.target.closest("#moreCands")){ candLimit+=60; renderCands(true); return; }
   const b=e.target.closest("[data-q],[data-p],[data-n],[data-c],[data-v]"); if(!b) return;
   if(b.dataset.v){ const [src,kind,i]=b.dataset.v.split(":"); const x=S.ex[src]?.sp?.[kind]?.[+i]; if(x){ if(!S.tracks[x.id]) S.tracks[x.id]=x; setNow(x.id); } }
