@@ -106,6 +106,14 @@
   .search-res div:hover{background:var(--chip)}
   .empty{color:var(--dim);padding:30px 0;text-align:center}
   label.ck{display:flex;gap:6px;align-items:center}
+  .popf{display:inline-flex;gap:6px;align-items:center} .popf b{font:600 12px var(--mono);min-width:52px}
+  .dual{position:relative;display:inline-block;width:120px;height:18px}
+  .dual::before{content:"";position:absolute;left:0;right:0;top:8px;height:3px;border-radius:2px;
+    background:linear-gradient(90deg,var(--line) var(--a,0%),var(--accent) var(--a,0%),var(--accent) var(--b,100%),var(--line) var(--b,100%))}
+  .dual input{position:absolute;left:0;top:0;width:100%;height:18px;margin:0;background:none;pointer-events:none;-webkit-appearance:none;appearance:none}
+  .dual input::-webkit-slider-runnable-track{background:none;height:18px}
+  .dual input::-webkit-slider-thumb{pointer-events:auto;-webkit-appearance:none;width:14px;height:14px;margin-top:2px;border-radius:50%;background:var(--accent);border:2px solid var(--bg);cursor:pointer}
+  .dual input::-moz-range-track{background:none} .dual input::-moz-range-thumb{pointer-events:auto;width:12px;height:12px;border-radius:50%;background:var(--accent);border:2px solid var(--bg);cursor:pointer}
   img[src=""]{visibility:hidden}
   .cand.sel{background:#16201d;outline:1px solid #2c4a41}
   body.dj [data-q], body.dj [data-p]{display:none}
@@ -219,6 +227,9 @@
       <label class="ck"><input type="checkbox" id="fKey"> キーが合う曲だけ</label>
       <label class="ck"><input type="checkbox" id="fArtist" checked> 同じアーティストを避ける</label>
       <label class="ck"><input type="checkbox" id="fHalf" checked> 倍／半分テンポも可</label>
+      <span class="ck popf" title="Spotify人気度（POP）がこの範囲の曲だけ候補に出す。0〜100なら絞り込みなし（ダブルクリックで戻す）">POP
+        <span class="dual"><input type="range" id="popMin" min="0" max="100" step="5" value="0" aria-label="POPの下限"><input type="range" id="popMax" min="0" max="100" step="5" value="100" aria-label="POPの上限"></span>
+        <b id="popVal">すべて</b></span>
       <label class="ck" hidden title="このタグの曲だけ候補に出す">タグ <select id="fTag"></select></label>
       <label class="ck">コピー内容
         <select id="copyMode"><option value="title">曲名のみ</option><option value="both">曲名＋アーティスト</option><option value="artist">アーティストのみ</option></select>
@@ -620,6 +631,7 @@ function suggest(){
   const curBpm=bpmOf(cur), curKey=keyOf(cur), curGen=genOf(cur), curArt=new Set(S.tracks[cur]?.artists.map(a=>a.id)), curAf=afOf(cur);
   const lm=labelMap(), vctx={curAf, st:(M.af||M.snd)?afStats():{}, lm, curG:genreSet(cur,lm)};
   const fB=+$("#fBpm").value, fK=$("#fKey").checked, fA=$("#fArtist").checked, half=$("#fHalf").checked;
+  const [pMin,pMax]=popRange(), fPop=pMin>0||pMax<100;  // POPの範囲（人気度が分からない曲は絞り込み中は出さない）
   const W={flow:w("wFlow")*M.flow,co:w("wCo")*M.co,bpm:w("wBpm")*M.bpm,key:w("wKey")*M.key,gen:w("wGen")*M.gen,year:w("wYear")*(M.year??1),af:M.af,nov:M.nov,rnd:M.rnd,pop:M.pop,eng:M.eng,cross:M.cross||0,snd:M.snd||0};
   const seed=cur+":"+(S.seed||0);
   // 点数の表示用: 全部の条件が満点のときの合計（1位を100にすると、BPMとキーが合うだけの曲も100に見えてしまうため）
@@ -630,6 +642,7 @@ function suggest(){
   const res=[], weak=[];
   for(const id of pool){
     if(played.has(id)) continue; const t=S.tracks[id]; if(!t) continue;
+    if(fPop && (t.pop==null || t.pop<pMin || t.pop>pMax)) continue;
     const tg=tagsOf(id); if(fTag && !tg.includes(fTag)) continue; let yv=null;
     const sameArt = t.artists.some(a=>curArt.has(a.id));
     if(fA && sameArt) continue;
@@ -744,7 +757,7 @@ function renderCands(keepSel){
   if(later(()=>renderCands(true))) return;
   if(!keepSel) sel=0;
   // Now・選び方・絞り込みが変わったときだけ60曲に戻す（裏での描き直しでは戻さない）
-  const ck=[S.now,LS.get("mode","flow"),$("#fBpm").value,$("#fKey").checked,$("#fArtist").checked,$("#fHalf").checked,LS.get("fTag","")].join("|");
+  const ck=[S.now,LS.get("mode","flow"),$("#fBpm").value,$("#fKey").checked,$("#fArtist").checked,$("#fHalf").checked,LS.get("fTag",""),popRange().join("-")].join("|");
   if(ck!==candCtx){ candCtx=ck; candLimit=60; }
   const list=suggest(); const top=list.slice(0,candLimit);
   $("#candInfo").textContent = list.weak?`候補 ${list.length}曲（参考）`:`候補 ${list.length}曲`;
@@ -1442,6 +1455,15 @@ $("#btnClearHist").onclick=()=>{ S.hist=[]; LS.set("hist",[]); refresh(); };
 ["wFlow","wCo","wBpm","wKey","wGen","wYear"].forEach(id=>{ const el=$("#"+id); const sp=el.nextElementSibling; el.value=LS.get(id,el.value); sp.textContent=el.value;
   el.oninput=()=>{ sp.textContent=el.value; LS.set(id,el.value); renderCands(); }; });
 ["fBpm","fKey","fArtist","fHalf"].forEach(id=>$("#"+id).onchange=renderCands);
+// POPの範囲スライダー（つまみ2つ。下限が上限を越えないように押し戻す）。動かしている間は表示だけ、離したら候補を出し直す
+function popRange(){ return [+$("#popMin").value, +$("#popMax").value]; }
+function popShow(){ const [a,b]=popRange(); $("#popVal").textContent=a<=0&&b>=100?"すべて":`${a}〜${b}`;
+  const d=$(".dual"); d.style.setProperty("--a",a+"%"); d.style.setProperty("--b",b+"%"); }
+$("#popMin").value=LS.get("popMin",0); $("#popMax").value=LS.get("popMax",100); popShow();
+for(const id of ["popMin","popMax"]){ const el=$("#"+id);
+  el.oninput=()=>{ const lo=$("#popMin"), hi=$("#popMax"); if(+lo.value>+hi.value){ if(id==="popMin") lo.value=hi.value; else hi.value=lo.value; } popShow(); };
+  el.onchange=()=>{ LS.set("popMin",+$("#popMin").value); LS.set("popMax",+$("#popMax").value); renderCands(); }; }
+$(".dual").ondblclick=()=>{ $("#popMin").value=0; $("#popMax").value=100; popShow(); LS.set("popMin",0); LS.set("popMax",100); renderCands(); };
 $("#fTag").onchange=e=>{ LS.set("fTag",e.target.value); renderCands(); };
 function renderModes(){ const cur=LS.get("mode","flow");
   $("#modes").innerHTML=Object.entries(MODES).map(([k,v])=>`<button data-mode="${k}" class="${k===cur?"on":""}" title="${esc(v.tip)}">${v.label}</button>`).join("");
