@@ -69,6 +69,7 @@
   .cand .sub .gen{color:var(--accent2)} .cand .sub .af{cursor:help}
   .gp{display:inline-block;font:600 11px/1.5 system-ui,sans-serif;padding:0 7px;border-radius:9px;margin-left:5px;vertical-align:2px;white-space:nowrap;
     color:hsl(var(--h) 70% 72%);background:hsl(var(--h) 45% 20% / .55);border:1px solid hsl(var(--h) 45% 38%)}
+  .na{font:600 10px var(--mono);color:var(--warn);border:1px solid var(--warn);border-radius:3px;padding:0 4px;vertical-align:3px}
   .gj{font-size:11px;margin-left:6px;vertical-align:2px} .gj.g{color:var(--accent)} .gj.y{color:var(--accent2)} .gj.r{color:var(--warn)}
   .gp.none{--h:0;color:var(--dim);background:none;border-color:var(--line);font-weight:400}
   .deck .gps{margin-top:4px} .deck .gps .gp{margin:0 4px 0 0;font-size:12px}
@@ -389,8 +390,12 @@ async function api(path, opt={}){
 function slimTrack(t){
   if(!t || t.type && t.type!=="track" || !t.id || t.is_local) return null;
   const imgs = t.album?.images||[];
-  return {id:t.id, uri:t.uri, name:t.name, artists:(t.artists||[]).map(a=>({id:a.id,name:a.name})),
+  // market=from_token で読むと、配信が別の版に差し替わった曲は差し替え先が返る（linked_from が元の曲）→ 元のIDのまま持つ
+  const lf=t.linked_from?.id ? t.linked_from : null;
+  const o={id:lf?lf.id:t.id, uri:lf?.uri||t.uri, name:t.name, artists:(t.artists||[]).map(a=>({id:a.id,name:a.name})),
     album:t.album?.name||"", albumId:t.album?.id||"", dur:t.duration_ms||0, isrc:t.external_ids?.isrc||"", img:(imgs[imgs.length-1]||imgs[0]||{}).url||"", pop:Number.isFinite(t.popularity)?t.popularity:null, year:+(t.album?.release_date||"").slice(0,4)||null};
+  if(t.is_playable===false) o.na=1;  // リンク切れ（Spotifyで再生できない＝アプリでグレーになる曲）
+  return o;
 }
 async function loadPlaylistIndex(){
   if(!S.me) S.me = await api("/me");
@@ -426,7 +431,7 @@ async function scan(opt={}){
       const old = keep.get(p.id);
       if(!full && old && old.snapshot===p.snapshot){ next.push(old); }
       else{
-        const ids=[]; let url=`/playlists/${p.id}/items?limit=50`;
+        const ids=[]; let url=`/playlists/${p.id}/items?limit=50&market=from_token`;
         while(url){ const j = await api(url);
           for(const it of j.items||[]){ const t = slimTrack(it.item||it.track); if(t){ S.tracks[t.id]=t; ids.push(t.id); } }
           url=j.next; await sleep(80); }
@@ -437,7 +442,7 @@ async function scan(opt={}){
     }
     S.playlists = next;
     if($("#incSaved").checked && (!opt.auto || opt.saved)){
-      const ids=[]; let url="/me/tracks?limit=50", first=true;
+      const ids=[]; let url="/me/tracks?limit=50&market=from_token", first=true;
       while(url){ const j=await api(url); if(first){ first=false; LS.set("savedSig",savedSig(j)); } for(const it of j.items||[]){ const t=slimTrack(it.track||it.item); if(t){S.tracks[t.id]=t; ids.push(t.id);} } url=j.next; $("#scanMsg").textContent=`お気に入り ${ids.length}曲…`; await sleep(80); }
       S.saved=ids;
     }
@@ -449,6 +454,25 @@ async function scan(opt={}){
   }catch(e){ $("#scanMsg").textContent="中断："+e.message; if(opt.auto) setStatus("自動取り込みを中断："+e.message); S.playlists=[...next, ...S.playlists.filter(p=>!next.find(n=>n.id===p.id))]; await persist(); buildIndex(); }
   finally{ S.scanning=false; }
 }
+// リンク切れの確認: 全曲を /tracks?ids=（50曲ずつ、market=from_token）で聞き直す。14日おき。
+// 返りが null（曲が消えた）か is_playable:false ならリンク切れ、再生できるようになっていれば印を外す
+async function naCheck(force){ if(S.scanning || S.naRunning || !(await token())) return 0;
+  if(!force && Date.now()-LS.get("naAt",0) < 14*864e5) return 0; S.naRunning=true; let ch=0, n=0;
+  let i=0;
+  try{ const ids=Object.keys(S.tracks);
+    for(;i<ids.length;i+=50){ const part=ids.slice(i,i+50); const j=await api("/tracks?market=from_token&ids="+part.join(","));
+      (j.tracks||[]).forEach((tr,k)=>{ const t=S.tracks[part[k]]; if(!t) return; const dead=!tr || tr.is_playable===false;
+        if(dead!==!!t.na){ ch++; if(dead) t.na=1; else delete t.na; } if(dead) n++; });
+      if(i%500===0) setStatus(`リンク切れを確認中… ${Math.min(i+50,ids.length)}/${ids.length}`); await sleep(100); }
+    LS.set("naAt",Date.now());
+    if(ch){ await persist(); libTouch(); refresh(); autoSync(); }
+    setStatus(n?`リンク切れ ${n}曲（候補に出しません）`:"リンク切れの曲はありません");
+  }catch(e){ console.warn("naCheck",e);
+    // まとめて聞く /tracks?ids= が使えない（最初の1回から失敗）ときは、プレイリストとお気に入りを全部読み直す（読むときに is_playable も付く）
+    if(i===0){ S.naRunning=false; await scan({auto:true,full:true,saved:true}); LS.set("naAt",Date.now());
+      const n=Object.values(S.tracks).filter(t=>t.na).length; setStatus(n?`リンク切れ ${n}曲（候補に出しません）`:"リンク切れの曲はありません"); }
+  } finally{ S.naRunning=false; }
+  return ch; }
 const TRACK_VER=2;  // 2: 人気度(pop)を保存。古いデータは一度だけ全部読み直す
 const savedSig=j=>(j.total||0)+":"+((j.items||[])[0]?.track?.id||"");
 
@@ -641,7 +665,7 @@ function suggest(){
   const pool = new Set([...Object.keys(S.occ), ...S.saved]);
   const res=[], weak=[];
   for(const id of pool){
-    if(played.has(id)) continue; const t=S.tracks[id]; if(!t) continue;
+    if(played.has(id)) continue; const t=S.tracks[id]; if(!t || t.na) continue;
     if(fPop && (t.pop==null || t.pop<pMin || t.pop>pMax)) continue;
     const tg=tagsOf(id); if(fTag && !tg.includes(fTag)) continue; let yv=null;
     const sameArt = t.artists.some(a=>curArt.has(a.id));
@@ -709,9 +733,9 @@ function renderDeck(force){
   const m=S.meta[t.id]||{};
   const undo=S.hist.length?`<button class="sm" data-undo title="ひとつ前のNowに戻す（U）">↶ 戻す</button>`:"";
   $("#mobileNow").innerHTML=`<b>NOW</b>${esc(t.name)} <span class="muted">— ${esc(arts(t))}</span><span class="m">${m.bpm?m.bpm.toFixed(1):"—"} ${m.key||""}</span>${undo?" "+undo:""}`;
-  $("#deck").innerHTML=`<div class="row"><img src="${esc(t.img)}" alt=""><div><div class="t">${esc(t.name)}</div><div class="a">${esc(arts(t))}</div>${(()=>{ const gl=genreList(t.id,labelMap()); return gl.length?`<div class="gps">${gl.slice(0,4).map(x=>genrePill(x,true)).join("")}</div>`:""; })()}<div class="muted">${esc(t.album)} ${t.year||""}</div></div></div>
+  $("#deck").innerHTML=`<div class="row"><img src="${esc(t.img)}" alt=""><div><div class="t">${esc(t.name)}${t.na?` <span class="na" title="Spotifyで再生できない曲（配信停止・地域制限など）。候補には出しません">リンク切れ</span>`:""}</div><div class="a">${esc(arts(t))}</div>${(()=>{ const gl=genreList(t.id,labelMap()); return gl.length?`<div class="gps">${gl.slice(0,4).map(x=>genrePill(x,true)).join("")}</div>`:""; })()}<div class="muted">${esc(t.album)} ${t.year||""}</div></div></div>
    <div class="bk"><span class="big">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="muted">BPM</span><span class="big k">${m.key||"—"}</span><span class="muted">${m.genre?esc(m.genre):""} ${m.src?"("+(SRC_LABEL[m.src]||m.src)+(m.kSrc&&m.kSrc!==m.src?" / キー: "+(SRC_LABEL[m.kSrc]||m.kSrc):"")+(m.bSrc&&m.bSrc!==m.src?" / BPM: "+(SRC_LABEL[m.bSrc]||m.bSrc):"")+")":""}${m.src==="rekordbox"&&m.rbName&&norm(m.rbName)!==norm(t.name)?` <span class="muted" title="rekordbox のこの曲と照合しました">← rekordbox「${esc(m.rbName)}」</span>`:""}</span></div>
-   <div class="bk"><input id="eBpm" placeholder="BPM" value="${m.bpm||""}"><input id="eKey" placeholder="キー 8A/Am" value="${m.key||""}"><button class="sm" id="saveMeta">保存</button><button class="sm" id="tap">TAP</button><button class="sm" data-p="${t.id}" title="Spotifyで再生">▶ 再生</button><button class="sm" data-c="${t.id}" title="曲名をコピー">⎘ コピー</button>${undo}<span class="muted" id="tapv"></span></div>
+   <div class="bk"><input id="eBpm" placeholder="BPM" value="${m.bpm||""}"><input id="eKey" placeholder="キー 8A/Am" value="${m.key||""}"><button class="sm" id="saveMeta">保存</button><button class="sm" id="tap">TAP</button><button class="sm" data-p="${t.id}" title="Spotifyで再生">▶ 再生</button><button class="sm" data-c="${t.id}" title="曲名をコピー">⎘ コピー</button><button class="sm" data-lyr="${t.id}" title="曲名とアーティスト名で歌詞を検索（別のタブで開く。アプリでは歌詞を取得しない）">歌詞 ↗</button>${undo}<span class="muted" id="tapv"></span></div>
    <div class="tags" id="deckTags">${tagsOf(t.id).map(x=>`<span class="chip tag">#${esc(x)}<button data-deltag="${esc(x)}" title="外す">×</button></span>`).join("")}<input id="tagIn" placeholder="＋タグ（T）" list="tagList" autocomplete="off"><datalist id="tagList">${[...new Set([...allTags(),...PRESET_ALL])].map(x=>`<option value="${esc(x)}">`).join("")}</datalist>${allTags().filter(x=>!tagsOf(t.id).includes(x)).slice(0,6).map(x=>`<span class="chip sug" data-addtag="${esc(x)}" title="このタグを付ける">＋${esc(x)}</span>`).join("")}</div>
    <details class="tagPre" id="tagPre"${LS.get("tagPre",false)?" open":""}><summary>定番タグから選ぶ</summary>${TAG_PRESET.map(([g,l])=>`<div class="tpg"><span class="muted">${g}</span>${l.map(x=>tagsOf(t.id).includes(x)?`<span class="chip tag g" data-deltag="${esc(x)}" title="外す">#${esc(x)}</span>`:`<span class="chip sug" data-addtag="${esc(x)}" title="このタグを付ける">＋${esc(x)}</span>`).join("")}</div>`).join("")}</details>`;
   $("#tagIn").onkeydown=e=>{ if(e.isComposing||e.keyCode===229) return;  // 日本語変換の確定Enterでは追加しない
@@ -1215,7 +1239,7 @@ async function findLibGist(){ let id=LS.get("libGistId",""); if(id){ const r=awa
   return null; }
 function libTouch(){ LS.set("libStamp",Date.now()); }
 function libPayload(){
-  const T=Object.values(S.tracks).map(t=>[t.id,t.name,t.artists.map(a=>[a.id,a.name]),t.album,t.albumId||"",t.dur||0,t.isrc||"",(t.img||"").replace(IMG_PRE,"~"),t.pop??null,t.year||null]);
+  const T=Object.values(S.tracks).map(t=>[t.id,t.name,t.artists.map(a=>[a.id,a.name]),t.album,t.albumId||"",t.dur||0,t.isrc||"",(t.img||"").replace(IMG_PRE,"~"),t.pop??null,t.year||null,t.na?1:0]);
   const af={}; for(const [id,m] of Object.entries(S.meta)) if(m.af){ const o={}; for(const [k,v] of Object.entries(m.af)) if(typeof v==="number") o[k]=Math.round(v*1000)/1000; af[id]=o; }
   return {v:1, at:LS.get("libStamp",0), tracks:T, playlists:S.playlists, saved:S.saved, plIndex:S.plIndex, ag:S.ag, af, rb:S.rb}; }
 async function libPush(){ const stamp=LS.get("libStamp",0); if(!stamp || stamp<=LS.get("libSent",0) || !Object.keys(S.tracks).length) return;
@@ -1228,8 +1252,8 @@ async function libPull(){ const id=await findLibGist(); if(!id) return 0;
   const g=await (await gh("/gists/"+id)).json(); const f=g.files?.[LIB_FILE]; if(!f) return 0;
   const d=JSON.parse(f.truncated ? await (await fetch(f.raw_url)).text() : f.content);
   if(!(d.at>LS.get("libStamp",0))) return 0;
-  for(const r of d.tracks||[]){ const [id,name,ar,album,albumId,dur,isrc,img,pop,year]=r;
-    S.tracks[id]={id,uri:"spotify:track:"+id,name,artists:ar.map(([id,name])=>({id,name})),album,albumId,dur,isrc,img:(img||"").replace(/^~/,IMG_PRE),pop,year}; }
+  for(const r of d.tracks||[]){ const [id,name,ar,album,albumId,dur,isrc,img,pop,year,na]=r;
+    S.tracks[id]={id,uri:"spotify:track:"+id,name,artists:ar.map(([id,name])=>({id,name})),album,albumId,dur,isrc,img:(img||"").replace(/^~/,IMG_PRE),pop,year}; if(na) S.tracks[id].na=1; }
   S.playlists=d.playlists||S.playlists; S.saved=d.saved||S.saved; if(d.plIndex?.length) S.plIndex=d.plIndex;
   for(const [aid,v] of Object.entries(d.ag||{})) if(!S.ag[aid] || (v.at||0)>(S.ag[aid].at||0)) S.ag[aid]=v;
   for(const [id,a] of Object.entries(d.af||{})){ const m=S.meta[id]||(S.meta[id]={}); m.af={...a,...(m.af||{})}; }
@@ -1368,7 +1392,7 @@ $("#csv").onchange=e=>e.target.files.length&&importCsv([...e.target.files]).catc
 function doSearch(){
   const q=$("#q").value.trim().toLowerCase(); if(!q){ $("#sres").innerHTML=""; return; }
   const out=[]; for(const t of Object.values(S.tracks)){ if((t.name+" "+arts(t)).toLowerCase().includes(q)){ out.push(t); if(out.length>=25) break; } }
-  $("#sres").innerHTML = out.map(t=>`<div data-n="${t.id}">${esc(t.name)} <span class="muted">— ${esc(arts(t))}</span></div>`).join("") || `<div class="muted">見つかりません</div>`;
+  $("#sres").innerHTML = out.map(t=>`<div data-n="${t.id}">${esc(t.name)} <span class="muted">— ${esc(arts(t))}</span>${t.na?` <span class="na">リンク切れ</span>`:""}</div>`).join("") || `<div class="muted">見つかりません</div>`;
 }
 
 // ---------- キーボード操作 ----------
@@ -1415,8 +1439,12 @@ function toTopCheck(){ const r=$("#cands").getBoundingClientRect(); $("#toTop").
 function toTop(){ sel=0; $(".filters").scrollIntoView({behavior:"smooth",block:"start"}); $$("#cands .cand").forEach((x,i)=>x.classList.toggle("sel",i===0)); }
 $("section.list").addEventListener("scroll",toTopCheck,{passive:true}); window.addEventListener("scroll",toTopCheck,{passive:true});
 $("#toTop").onclick=toTop;
+// 歌詞は取得・表示しない。曲名（「 - Remastered」や括りを除く）＋アーティスト名で検索したページを別タブで開くだけ
+function openLyrics(id){ const t=S.tracks[id]; if(!t) return; const nm=t.name.replace(/\s*[\(\[].*?[\)\]]/g,"").replace(/\s+-\s+.*$/,"").trim()||t.name;
+  window.open("https://www.google.com/search?q="+encodeURIComponent(`${nm} ${t.artists[0]?.name||""} 歌詞`),"_blank","noopener"); }
 document.addEventListener("click",e=>{
   if(e.target.closest("[data-undo]")){ undoNow(); return; }
+  const ly=e.target.closest("[data-lyr]"); if(ly){ openLyrics(ly.dataset.lyr); return; }
   if(e.target.closest("#moreCands")){ candLimit+=60; renderCands(true); return; }
   const b=e.target.closest("[data-q],[data-p],[data-n],[data-c],[data-v]"); if(!b) return;
   if(b.dataset.v){ const [src,kind,i]=b.dataset.v.split(":"); const x=S.ex[src]?.sp?.[kind]?.[+i]; if(x){ if(!S.tracks[x.id]) S.tracks[x.id]=x; setNow(x.id); } }
@@ -1512,7 +1540,7 @@ $("#autoInfo").checked=LS.get("autoInfo",true); $("#autoInfo").onchange=e=>{ LS.
   if(LS.get("autoSync",true) && LS.get("ghTok","")){ await syncPull(true); autoSync(); }
   if(authed) await autoRefreshLib(true);
   if(LS.get("autoRb",true) && !S.scanning) rbFill().then(g=>{ if(g) autoSync(); });
-  if(authed && !S.scanning) agFill();
+  if(authed && !S.scanning) agFill().then(()=>naCheck());
   setTimeout(checkUpdate,20e3);
   setInterval(async()=>{ if(document.visibilityState!=="visible") return; await checkUpdate(); autoRefreshLib(); },10*60e3);
   document.addEventListener("visibilitychange",async()=>{

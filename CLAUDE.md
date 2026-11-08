@@ -33,7 +33,7 @@ DJ中に「次の曲」を自分のSpotifyライブラリから提案するブ�
 - **discogs**: 無認証 `database/search?artist=&track=`（25req/分）。ジャンル空のときだけ style を補う。`S.dg[id]` にキャッシュ、`rid` があれば `/releases/{id}` で詳細（`discogsRelease`）
 
 ## 曲データ（`slimTrack`）
-`{id, uri, name, artists, album, albumId, dur, isrc, img, pop, year}`。`pop` は Spotify人気度（TRACK_VER=2 で追加。LS `trackVer` が古いと次の読み込みで全PLを一度だけ読み直す）。
+`{id, uri, name, artists, album, albumId, dur, isrc, img, pop, year, na?}`。`na:1`＝リンク切れ（Spotifyで再生できない。ユーザー指定）: プレイリスト・お気に入りは `market=from_token` で読み `is_playable:false` なら付ける（差し替え版は `linked_from` の元IDのまま持つ）。`naCheck()` が14日おき（LS `naAt`、起動時 agFill の後）に全曲を `/tracks?ids=`（50件ずつ）で確認、null か再生不可なら付け、直っていれば外す。`/tracks?ids=` が最初から失敗したら全PL読み直し（`scan({full})`）で代える。リンク切れは候補に出さず、デッキと検索に「リンク切れ」。曲データ同期の配列の11番目。`pop` は Spotify人気度（TRACK_VER=2 で追加。LS `trackVer` が古いと次の読み込みで全PLを一度だけ読み直す）。
 ジャンルの情報は候補では曲名の横の1か所だけに出す（ユーザー指定）: 最大3つのラベル＋判定（同じジャンル／近いジャンル／ジャンル違い／ジャンル越え＝`c.gst`、チップには出さない）。ラベルは系統ごとに色分け（`genrePill`、色は `GENRE_FAM` の系統 → `FAM_HUE`、不明は「？」）。デッキにも最大4つ。ジャンルの並び `genreList()` = meta.genre → アーティストのSpotifyジャンル。アーティストのジャンルは `agFill()` が全アーティスト分を `/artists?ids=`（50件ずつ）でまとめて取得し `S.ag[artistId]={g,at}`（IndexedDB "ag"、30日、空も記録）。起動時と `autoMeta` で自動。`labelMap().__ag` に合流するので genreSet/genreSim も同じデータを使う。
 候補行の下 `subLine()`: 1行目 長さ・年・POP・レーベル、2行目 AF（E/D/V＝energy/danceability/valence×100）。レーベルは通信せず、集めた曲情報（`S.ex`）→ 同じアルバムの曲の情報（`labelMap`）→ Exportify → Discogs の順で分かるものだけ。
 
@@ -78,4 +78,4 @@ Spotify（人気度・レーベル・リリース・アーティストのジャ�
 
 ## やらないこと
 - 第三者APIキーのコード埋め込み
-- 歌詞の取得・表示
+- 歌詞の取得・表示（デッキの「歌詞 ↗」は曲名＋アーティスト名＋「歌詞」で Google 検索を別タブで開くだけ `openLyrics`。ユーザー指定）
