@@ -544,23 +544,58 @@ function afStats(){ const st={};
 function afSim(a,b,st){ if(!a||!b) return null; let s=0,w=0,n=0;
   for(const k in AF_W){ if(a[k]==null||b[k]==null||!st[k]) continue; const d=(a[k]-b[k])/st[k]; s+=AF_W[k]*d*d; w+=AF_W[k]; n++; }
   if(n<3) return null; return Math.max(0,1-Math.sqrt(s/w)/2); }  // ライブラリ平均的な散らばり1つ分ずれる→50%、2つ分→0%
-function genreSet(id,lm){ const out=new Set(); const g=S.meta[id]?.genre; if(g) g.toLowerCase().split(/[\/,;]/).forEach(x=>{ x=x.trim(); if(x) out.add(x); });
-  for(const a of S.tracks[id]?.artists||[]) for(const x of lm.__ag?.[a.id]||[]) out.add(x.toLowerCase());
+// ジャンル名の表記ゆれをそろえる（英語・カタカナ・日本語・ローマ字・全角・ハイフン → 同じ英語表記）
+// 例: メロコア／メロディックハードコア／Melodic-Hardcore／merokoa → "melodic hardcore"、Jロック／邦ロック／J-Rock → "j rock"
+const G_ALIAS=[[/メロディック ?ハードコア|メロコア|merokoa|melocore|melo core/g,"melodic hardcore"],[/スカ ?パンク|スカコア|skacore/g,"ska punk"],[/ポップ ?パンク/g,"pop punk"],
+  [/ポスト ?ハードコア/g,"post hardcore"],[/メタル ?コア/g,"metalcore"],[/デス ?コア/g,"deathcore"],[/ハードコア ?テクノ/g,"hardcore techno"],[/ハードコア/g,"hardcore"],
+  [/邦楽? ?ロック|j ?ロック|ジェイ ?ロック|\bjrock\b/g,"j rock"],[/邦楽? ?ポップ|j ?ポップ|\bjpop\b/g,"j pop"],[/j ?パンク|\bjpunk\b/g,"j punk"],[/パンク/g,"punk"],[/スカ/g,"ska"],
+  [/ラウド ?ロック|ラウド/g,"loud rock"],[/オルタナティ[ブヴ] ?ロック|オルタナ/g,"alternative rock"],[/ハード ?ロック/g,"hard rock"],[/ロック/g,"rock"],[/エモ/g,"emo"],[/メタル/g,"metal"],
+  [/ドラム ?(ン|アンド|&) ?ベース|drum ?('?n'?|&|and) ?bass|\bd ?& ?b\b|\bdnb\b/g,"drum and bass"],[/テック ?ハウス/g,"tech house"],[/ディープ ?ハウス/g,"deep house"],[/ハウス/g,"house"],
+  [/テクノ/g,"techno"],[/トランス/g,"trance"],[/ダブ ?ステップ/g,"dubstep"],[/ハード ?スタイル/g,"hardstyle"],[/ヒップ ?ホップ|\bhiphop\b/g,"hip hop"],[/ラップ/g,"rap"],
+  [/アール ?アンド ?ビー|\br ?(&|and|n) ?b\b/g,"r&b"],[/ソウル/g,"soul"],[/ファンク/g,"funk"],[/ジャズ/g,"jazz"],[/シティ ?ポップ/g,"city pop"],[/ポップス|ポップ/g,"pop"],
+  [/アニソン|アニメ/g,"anime"],[/ボカロ|ボーカロイド/g,"vocaloid"],[/レゲエ/g,"reggae"],[/ダンス ?ホール/g,"dancehall"],[/ディスコ/g,"disco"],[/アンビエント/g,"ambient"],
+  [/トラップ/g,"trap"],[/ドリル/g,"drill"],[/グライム/g,"grime"],[/ガレージ/g,"garage"],[/歌謡曲?/g,"kayokyoku"],[/演歌/g,"enka"],[/アイドル/g,"idol"],[/ベース ?ミュージック/g,"bass music"],[/エレクトロ/g,"electro"]];
+function normGenre(g){ let x=String(g||"").normalize("NFKC").toLowerCase().replace(/[・･]/g," ").replace(/[-_]+/g," ");
+  for(const [re,v] of G_ALIAS) x=x.replace(re," "+v+" "); return x.replace(/\s+/g," ").trim(); }
+function genreSet(id,lm){ const out=new Set(); const g=S.meta[id]?.genre; if(g) g.split(/[\/,;、]/).forEach(x=>{ x=normGenre(x); if(x) out.add(x); });
+  for(const a of S.tracks[id]?.artists||[]) for(const x of lm.__ag?.[a.id]||[]){ const n=normGenre(x); if(n) out.add(n); }
   return out; }
+// 単語の一致を見るとき、地域・年代・雰囲気だけの言葉は数えない（"japanese punk" と "japanese hip hop" を近いとしない）
+const G_STOP=new Set("japanese japan uk us german french korean swedish italian spanish brazilian american british australian dutch modern classic old new school music underground dance electronic alternative melodic progressive deep dark hard post experimental instrumental".split(" "));
+const gWords=s=>s.split(/\s+/).filter(w=>w.length>2 && !G_STOP.has(w));
 // 共通するジャンル名（チップ表示用）
-function genreHit(A,B){ for(const a of A) if(B.has(a)) return a; const words=s=>s.split(/[\s-]+/).filter(w=>w.length>2);
+function genreHit(A,B){ for(const a of A) if(B.has(a)) return a; const words=gWords;
   for(const a of A) for(const b of B){ const w=words(b).find(w=>words(a).includes(w)); if(w) return w; }
   const fa=new Set([...A].flatMap(famOf)); for(const b of B){ const f=famOf(b).find(f=>fa.has(f)); if(f) return f+"系"; } return ""; }
 // 大きな括り（deathcore と metalcore、tech house と deep house など、単語が違っても近いもの）
-const GENRE_FAM=[["metal",/metal|deathcore|djent|thrash|grind|doom|sludge|screamo|post-hardcore|mathcore/],["punk",/punk|emo|hardcore punk|post-hardcore/],["rock",/rock|grunge|shoegaze|indie/],
-  ["house",/house|garage|disco/],["techno",/techno|minimal|industrial|ebm/],["trance",/trance|psy/],["dnb",/drum and bass|dnb|jungle|neurofunk|liquid funk/],["bass",/dubstep|riddim|bass music|brostep|future bass|trap edm/],
-  ["hardstyle",/hardstyle|hardcore techno|gabber|rawstyle/],["edm",/edm|big room|electro house|progressive house|future house|bass house/],["hiphop",/hip hop|rap|trap|drill|grime|boom bap/],["rnb",/r&b|soul|funk|neo soul/],
-  ["latin",/reggaeton|latin|dembow|cumbia|baile|funk carioca/],["caribbean",/dancehall|reggae|soca|afrobeats|afro/],["pop",/pop|idol|j-pop|k-pop|city pop/],["jazz",/jazz|bossa|swing/],["ambient",/ambient|downtempo|chill|lo-fi|lofi/]];
+const GENRE_FAM=[["metal",/metal|deathcore|djent|thrash|grind|doom|sludge|screamo|post hardcore|mathcore|loud rock/],
+  ["punk",/punk|\bemo\b|emocore|hardcore(?! techno)|\bska\b|skate|\boi\b/],["rock",/rock|grunge|shoegaze|indie|alternative|visual kei/],
+  ["house",/house|garage(?! rock)|disco/],["techno",/techno|minimal|industrial|ebm/],["trance",/trance|psy/],["dnb",/drum and bass|jungle|neurofunk|liquid funk/],["bass",/dubstep|riddim|bass music|brostep|future bass|trap edm/],
+  ["hardstyle",/hardstyle|hardcore techno|gabber|rawstyle|frenchcore/],["edm",/edm|big room|electro house|progressive house|future house|bass house/],["hiphop",/hip hop|\brap\b|trap|drill|grime|boom bap/],["rnb",/r&b|soul|funk|neo soul/],
+  ["latin",/reggaeton|latin|dembow|cumbia|baile|funk carioca/],["caribbean",/dancehall|reggae|soca|afrobeats|afro/],["pop",/pop|idol|anime|vocaloid|kayokyoku/],["jazz",/jazz|bossa|swing/],["ambient",/ambient|downtempo|chill|lo-fi|lofi/]];
 const famOf=g=>GENRE_FAM.filter(([,re])=>re.test(g)).map(([k])=>k);
-function genreSim(A,B){ if(!A.size||!B.size) return null; let best=0;
-  const words=s=>s.split(/[\s-]+/).filter(w=>w.length>2);
+// さらに大きな括り（ジャンル越えで「越えた」と言えないもの: パンク⇔メロコア⇔ロック⇔メタル、ハウス⇔テクノ⇔トランス など）
+const GENRE_SUPER={metal:"guitar",punk:"guitar",rock:"guitar",house:"club",techno:"club",trance:"club",edm:"club",hardstyle:"club",dnb:"bassm",bass:"bassm",hiphop:"urban",rnb:"urban",latin:"tropical",caribbean:"tropical"};
+const supOf=g=>famOf(g).map(f=>GENRE_SUPER[f]).filter(Boolean);
+// ---------- ジャンル地図（Every Noise at Once / Glenn McDonald の engenremap を genre-map.json に保存したもの） ----------
+// Spotifyのジャンル約6300個の位置（縦: 密・ふんわり⇔とがった・跳ねる、横: 生音⇔電子）と色（音の特徴）。
+// 5つを散らばりで割った重み付き距離で「ジャンルどうしがどれだけ離れているか」を測る（パンク⇔メロコア 0.3、パンク⇔テックハウス 2.2 くらい）
+let GMAP=null; const GM_SD=[.232,.21,.188,.093,.233], GM_W=[.3,1.5,1,.5,1], GM_WS=4.3;
+async function loadGenreMap(){ try{ const j=await (await fetch("genre-map.json")).json(); const m=new Map();
+  for(const [n,t,l,c] of j){ const k=normGenre(n); if(!m.has(k)) m.set(k,[t/22648,l/1500,parseInt(c.slice(0,2),16)/255,parseInt(c.slice(2,4),16)/255,parseInt(c.slice(4,6),16)/255]); }
+  GMAP=m; refresh(); }catch(e){ console.warn("genre map",e); } }
+// 2つのジャンルの集まりのいちばん近い組み合わせの距離（地図に無いジャンルしかなければ null）
+function gmDist(A,B){ if(!GMAP||!A.size||!B.size) return null; const pa=[],pb=[]; for(const a of A){ const v=GMAP.get(a); if(v) pa.push(v); } if(!pa.length) return null;
+  for(const b of B){ const v=GMAP.get(b); if(v) pb.push(v); } if(!pb.length) return null; let best=Infinity;
+  for(const a of pa) for(const b of pb){ let x=0; for(let i=0;i<5;i++){ const d=(a[i]-b[i])/GM_SD[i]; x+=GM_W[i]*d*d; } if(x<best) best=x; }
+  return Math.sqrt(best/GM_WS); }
+const GM_NEAR=.6;  // 地図でこれより近ければ「近いジャンル」
+function genreSim(A,B,md){ if(!A.size||!B.size) return null; let best=0;
+  const words=gWords;
   for(const a of A) for(const b of B){ if(a===b) return 1; const wa=words(a); if(words(b).some(w=>wa.includes(w))) best=.5; }
   if(!best){ const fa=new Set([...A].flatMap(famOf)); if([...B].some(b=>famOf(b).some(f=>fa.has(f)))) best=.4; }
+  if(!best){ const sa=new Set([...A].flatMap(supOf)); if([...B].some(b=>supOf(b).some(f=>sa.has(f)))) best=.2; }
+  if(!best){ if(md===undefined) md=gmDist(A,B); if(md!=null && md<GM_NEAR) best=.3; }
   return best; }
 function vibe(cur,id,ctx){ const parts=[];
   const s=afSim(ctx.curAf,afOf(id),ctx.st); if(s!=null) parts.push(["音",s,.6]);
@@ -614,10 +649,10 @@ function suggest(){
     if(kc){ if(fK && kc.s<.5) continue; sc+=W.key*kc.s; chips.push([kc.s>=.85?"g":kc.s>=.4?"y":"r", `${keyOf(id)} ${kc.t}`]); }
     else if(fK && curKey) continue;
     // ジャンル: 曲のジャンル＋アーティストのSpotifyジャンルで比べる。両方分かっていて全く重ならなければ減点
-    const gSet=genreSet(id,lm), gs=genreSim(vctx.curG,gSet); let gst=null;
+    const gSet=genreSet(id,lm), md=gmDist(vctx.curG,gSet), gs=genreSim(vctx.curG,gSet,md); let gst=null;
     // ジャンル越え: 今の曲のジャンルが分かっていれば、同じ・近いジャンル（単語や大きな括りが重なる）は候補から外す。
-    // 全く重ならない曲だけ加点、ジャンル不明の曲は下のほうへ。音の感じが近いほど加点
-    if(W.cross && vctx.curG.size){ if(gs==null) sc-=W.cross*.6; else if(gs>0) continue; else { sc+=W.cross; gst=["g","ジャンル越え"]; } }
+    // 全く重ならない曲だけ、ジャンル地図で遠いほど加点（地図に無ければ中くらい）。ジャンル不明の曲は下のほうへ。音の感じが近いほど加点
+    if(W.cross && vctx.curG.size){ if(gs==null) sc-=W.cross*.6; else if(gs>0) continue; else { const v=md==null?.6:Math.max(.3,Math.min(1,(md-GM_NEAR)/.9)); sc+=W.cross*v; gst=[v>=.6?"g":"y",v>=.9?"ジャンル越え（遠い）":"ジャンル越え"]; } }
     if(W.snd){ const sd=afSim(curAf,afOf(id),vctx.st); if(sd!=null){ sc+=W.snd*(sd-.4)*2; if(sd>=.55) chips.push([sd>=.7?"g":"y",`音の感じ ${Math.round(sd*100)}%`]); } }
     if(gs!=null && W.gen){ if(gs>0){ sc+=W.gen*gs; if(!gst) gst=[gs>=1?"g":"y", gs>=1?"同じジャンル":"近いジャンル"]; } else { sc-=W.gen*2; if(!gst) gst=["r","ジャンル違い"]; } }
     const af=afOf(id);
@@ -879,10 +914,11 @@ async function rbFill(ids, quiet){
 // 読み込み後の自動補完：ReccoBeats → 残りをDeezer → 同期
 // ---------- ジャンルをひと目で（系統ごとに色分けしたラベル） ----------
 const FAM_HUE={metal:0,punk:15,rock:30,house:165,techno:200,trance:250,dnb:280,bass:300,hardstyle:330,edm:185,hiphop:45,rnb:55,latin:95,caribbean:120,pop:340,jazz:70,ambient:220};
-function genrePill(g,big){ if(!g) return ""; const f=famOf(g.toLowerCase())[0]; const h=f!=null?FAM_HUE[f]:null;
+function genrePill(g,big){ if(!g) return ""; const f=famOf(normGenre(g))[0]; const h=f!=null?FAM_HUE[f]:null;
   return `<span class="gp"${h!=null?` style="--h:${h}"`:` style="--h:210;filter:saturate(0)"`} title="${esc(g)}${f?"（"+f+"系）":""}">${esc(cut(g,big?28:22))}</span>`; }
-function genreList(id,lm){ const out=[], g=S.meta[id]?.genre; if(g) out.push(...g.split(/[\/,;]/).map(x=>x.trim()).filter(Boolean));
-  for(const a of S.tracks[id]?.artists||[]) for(const x of lm.__ag?.[a.id]||[]) if(!out.some(y=>y.toLowerCase()===x.toLowerCase())) out.push(x);
+function genreList(id,lm){ const out=[], seen=new Set(), add=x=>{ x=String(x).trim(); const n=normGenre(x); if(n && !seen.has(n)){ seen.add(n); out.push(x); } };
+  const g=S.meta[id]?.genre; if(g) g.split(/[\/,;、]/).forEach(add);
+  for(const a of S.tracks[id]?.artists||[]) for(const x of lm.__ag?.[a.id]||[]) add(x);
   return out; }
 // 全アーティストのSpotifyジャンルをまとめて取得（/artists?ids= 50件ずつ）。取れなかった（空）も記録して30日は聞き直さない
 const AG_TTL=1000*60*60*24*30; let agRunning=false;
@@ -1447,7 +1483,7 @@ $("#autoInfo").checked=LS.get("autoInfo",true); $("#autoInfo").onchange=e=>{ LS.
   if(authed){ LS.set("hadLogin",true); $("#btnLogin").textContent="接続済み"; try{ S.me=await api("/me"); setStatus(`${S.me.display_name||S.me.id} / 曲 ${Object.keys(S.tracks).length} / PL ${S.playlists.length}`);}catch(e){ setStatus(e.message); }
     if(LS.get("follow",true) && !LS.get("dj",false)){ $("#follow").checked=true; setFollow(true); } }
   if(!S.playlists.length && !LS.get("cid","")) openLib();
-  refresh();
+  refresh(); loadGenreMap();
   if(S.now && LS.get("autoInfo",true)) gatherInfo(S.now);
   // 曲データ同期を入れる前から使っている端末: 最後に読み込んだ時刻を曲データの時刻にする（新しく読み込んだ端末の方が勝つ）
   if(!LS.get("libStamp",0) && Object.keys(S.tracks).length) LS.set("libStamp",LS.get("libAt",1));

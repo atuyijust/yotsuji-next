@@ -5,6 +5,7 @@ DJ中に「次の曲」を自分のSpotifyライブラリから提案するブ�
 
 ## 構成
 - `index.html` … アプリ本体。**1ファイル完結**（HTML+CSS+vanilla JS、ビルド不要）
+- `genre-map.json` … Every Noise at Once（Glenn McDonald、everynoise.com/engenremap.html、2023年末で更新停止）のジャンル地図を抜き出したもの `[[名前, top, left, 色hex], …]`（約6300ジャンル、ユーザー指定で組み込み）。起動時に `loadGenreMap()` で読む
 - `manifest.json`, `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` … PWA（Macの Dock／iPhoneのホーム画面に追加用）
 - 外部ライブラリなし。npm なし。
 
@@ -37,7 +38,7 @@ DJ中に「次の曲」を自分のSpotifyライブラリから提案するブ�
 候補行の下 `subLine()`: 1行目 長さ・年・POP・レーベル、2行目 AF（E/D/V＝energy/danceability/valence×100）。レーベルは通信せず、集めた曲情報（`S.ex`）→ 同じアルバムの曲の情報（`labelMap`）→ Exportify → Discogs の順で分かるものだけ。
 
 ## スコアリング（`suggest()`）
-重み: wFlow（自分のプレイリスト内で直前／直後に並べた曲）、wCo（同じプレイリストに共起、1/log2(len+2)で重み付け）、wBpm（±2/4/6/8%、倍／半分テンポ可）、wKey（Camelot相性 `keyCompat`）、wYear（リリース年の近さ `yearOf`＝MusicBrainzの初リリース→アルバム年。±2年=1／±5年=.6／±10年=.25。チップは出さず候補2行目の年を緑/黄に色付け `c.yv`）、wGen（ジャンル: `genreSet`（meta.genre＋アーティストのSpotifyジャンル）同士を `genreSim` で比較。完全一致1・単語一致0.5・大きな括り `GENRE_FAM`（metal系・house系…）一致0.4。両方分かっていて全く重ならなければ −wGen×2 と「ジャンル違い」チップ）。候補の点数は1位=100ではなく、全条件満点の合計 `ideal` を100とした `pct`（BPMとキーだけ合う曲が100に見えないように）。
+重み: wFlow（自分のプレイリスト内で直前／直後に並べた曲）、wCo（同じプレイリストに共起、1/log2(len+2)で重み付け）、wBpm（±2/4/6/8%、倍／半分テンポ可）、wKey（Camelot相性 `keyCompat`）、wYear（リリース年の近さ `yearOf`＝MusicBrainzの初リリース→アルバム年。±2年=1／±5年=.6／±10年=.25。チップは出さず候補2行目の年を緑/黄に色付け `c.yv`）、wGen（ジャンル: `genreSet`（meta.genre＋アーティストのSpotifyジャンル）同士を `genreSim` で比較。完全一致1・単語一致0.5（地域・雰囲気だけの語 `G_STOP` は数えない）・大きな括り `GENRE_FAM`（metal系・house系…）一致0.4・さらに大きな括り `GENRE_SUPER`（guitar＝metal/punk/rock、club＝house/techno/trance/edm/hardstyle 等）一致0.2。ジャンル名は比べる前に `normGenre()` で表記ゆれをそろえる（`G_ALIAS`: カタカナ・日本語・ローマ字・全角・ハイフン → 英語。メロコア／メロディックハードコア／merokoa → melodic hardcore 等、ユーザー指定）。表示の `genreList` も同じ表記の重複を1つにする。名前で重ならなくても、ジャンル地図の距離 `gmDist()`（縦・横・色RGBの5つを散らばり `GM_SD` で割り重み `GM_W` を掛けた距離、両方の集まりのいちばん近い組み合わせ）が `GM_NEAR`=0.6 未満なら 0.3（近いジャンル）。ジャンル越えの加点は地図で遠いほど大きい（`(md-0.6)/0.9` を 0.3〜1、地図に無ければ 0.6、0.9以上で「ジャンル越え（遠い）」）。両方分かっていて全く重ならなければ −wGen×2 と「ジャンル違い」チップ）。候補の点数は1位=100ではなく、全条件満点の合計 `ideal` を100とした `pct`（BPMとキーだけ合う曲が100に見えないように）。
 フィルタ: BPM幅、キー一致のみ、同アーティスト回避、倍／半分可。今の曲の手がかりが少なく1曲も残らないときは、点の低い曲も「候補 N曲（参考）」として注記付きで出す（`weak`）。
 選び方 `MODES`（LS `mode`、候補欄上部のボタン／Mキー）: 各モードの倍率 `m` をスライダーの重みに掛ける。
 - flow いつもの流れ（従来どおり）／similar 似た曲（`vibe()`: 音 `afSim` 0.6＋ジャンル `genreSim` 0.25（同じPLは含めない。ユーザー指定）。`afSim` は7特徴量 `AF_W` をライブラリ内の標準偏差 `afStats()` で割った重み付き距離 → 散らばり1つ分で50%。ジャンルはmeta.genre＋集めたアーティストのSpotifyジャンル、完全一致1・単語一致0.5。チップに理由（音・ジャンル））／surprise ジャンル越え（キーは LS 互換のため "surprise" のまま。ユーザー指定で「自分にとっての意外性（初めての組み合わせ・隠れた曲）」はやめた。今の曲のジャンルが分かっていれば、同じ・近いジャンル（`genreSim`>0＝完全一致・単語一致・大きな括り一致）は候補から外す（ユーザー指定「同じようなのしか選ばれない」）。全く重ならない曲だけ +cross、ジャンル不明の曲は −cross×0.6。音の近さ `afSim` で +snd（倍率1、チップ「音の感じ NN%」）。flow/co は0。ゆらぎ `rnd01(now:seed)` 少し、🎲／Rで `S.seed` を変えて入れ替え）／up 上げる・down 落とす（energy 差 +0.03〜0.25 を加点）
