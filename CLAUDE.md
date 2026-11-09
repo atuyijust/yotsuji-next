@@ -78,6 +78,15 @@ Spotify（人気度・レーベル・リリース・アーティストのジャ�
 - DJモード（`setDj`）: 再生／キューボタンを隠し追従を止める
 - モバイル（@media max-width:760px）: 1カラム、`#mobileNow` 固定バー、`<details class="side">` で重み付け／履歴を折りたたみ
 
+## Playlist Forge（`forge/`）
+- 条件（ジャンル・年代・国・BPM・似せたい曲／アーティストなど）から Spotify 全体を探してプレイリストを作る別ページ。公開URL: https://atuyijust.github.io/yotsuji-next/forge/
+- ES モジュール構成（`forge/index.html`, `forge/css/style.css`, `forge/js/*.js`）。ビルド不要。詳しくは `forge/README.md`
+- もとは `~/Documents/spotify-playlist-maker` で作ったもの。今後は `forge/` を正とする
+- Redirect URI は置いたフォルダの URL（`https://atuyijust.github.io/yotsuji-next/forge/`）。Spotify Dashboard に登録が必要
+- 同じサイトなので localStorage を共有する: Client ID は Forge の `spm.clientId` が空なら四辻 NEXT の `cid` を使う。トークンは別々（スコープが違うため）
+- 連携: 四辻 NEXT のヘッダー「プレイリスト作成 ↗」、デッキの「似た曲でプレイリスト ↗」（`forge/?seedTrack=曲ID` を別タブ `forge` で開く → Forge が「似せたい曲」に入れる。未ログインならログイン後に）
+- Forge の右上「四辻 NEXT」で戻る（パスが `/forge/` のときだけ表示）
+
 ## やらないこと
 - 第三者APIキーのコード埋め込み
 - 歌詞の取得・表示（デッキの「歌詞 ↗」は曲名＋アーティスト名＋「歌詞」で Google 検索を別タブで開くだけ `openLyrics`。ユーザー指定）

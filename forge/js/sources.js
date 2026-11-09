@@ -1,0 +1,311 @@
+// Spotify 以外のデータ源
+//  - ReccoBeats: 曲の特徴量（BPM・エネルギー等）、人気度、似た曲のおすすめ（キー不要）
+//  - Last.fm:    似たアーティスト（API キーが必要・無料）
+//  - MusicBrainz: アーティストの出身国（キー不要・1 秒 1 リクエストまで）
+import { chunk, pLimit, sleep, store, norm, idFromHref } from './util.js';
+
+const RB = 'https://api.reccobeats.com/v1';
+const rbLimit = pLimit(3);
+
+async function rbGet(path, params) {
+  return rbLimit(async () => {
+    const url = `${RB}${path}?${new URLSearchParams(params)}`;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const res = await fetch(url);
+      if (res.status === 429) {
+        await sleep(Math.min(Number(res.headers.get('Retry-After') || 2), 20) * 1000);
+        continue;
+      }
+      if (res.status === 404) return { content: [] };
+      if (!res.ok) {
+        if (attempt < 1 && res.status >= 500) {
+          await sleep(600);
+          continue;
+        }
+        const t = await res.text().catch(() => '');
+        throw new Error(`ReccoBeats エラー (${res.status}) ${t.slice(0, 120)}`);
+      }
+      return res.json();
+    }
+    throw new Error('ReccoBeats のレート制限に達しました');
+  });
+}
+
+// 特徴量キャッシュ（同じ曲を何度も取りに行かない）
+const FEAT_CACHE_KEY = 'spm.featCache';
+const featCache = new Map(Object.entries(store.get(FEAT_CACHE_KEY, {})));
+let featDirty = false;
+function saveFeatCache() {
+  if (!featDirty) return;
+  // 肥大化防止：新しい方から 8000 件だけ保持
+  const entries = [...featCache.entries()].slice(-8000);
+  store.set(FEAT_CACHE_KEY, Object.fromEntries(entries));
+  featDirty = false;
+}
+
+/** Spotify の曲 ID 配列 → Map(id → 特徴量 | null) */
+export async function audioFeatures(ids, onProgress) {
+  const result = new Map();
+  const todo = [];
+  for (const id of ids) {
+    if (featCache.has(id)) result.set(id, featCache.get(id));
+    else todo.push(id);
+  }
+  const groups = chunk(todo, 40);
+  let done = 0;
+  await Promise.all(
+    groups.map(async (g) => {
+      const d = await rbGet('/audio-features', { ids: g.join(',') }).catch(() => ({ content: [] }));
+      const found = new Set();
+      for (const f of d.content || []) {
+        const id = idFromHref(f.href);
+        if (!id) continue;
+        const feat = {
+          tempo: f.tempo,
+          energy: f.energy,
+          danceability: f.danceability,
+          valence: f.valence,
+          acousticness: f.acousticness,
+          instrumentalness: f.instrumentalness,
+          liveness: f.liveness,
+          speechiness: f.speechiness,
+          loudness: f.loudness,
+          key: f.key,
+          mode: f.mode,
+        };
+        result.set(id, feat);
+        featCache.set(id, feat);
+        found.add(id);
+      }
+      for (const id of g) {
+        if (!found.has(id)) {
+          result.set(id, null);
+          featCache.set(id, null);
+        }
+      }
+      featDirty = true;
+      done += g.length;
+      onProgress?.(done, todo.length);
+    }),
+  );
+  saveFeatCache();
+  return result;
+}
+
+/** Spotify の曲 ID 配列 → Map(id → 人気度) */
+export async function popularity(ids) {
+  const result = new Map();
+  await Promise.all(
+    chunk(ids, 40).map(async (g) => {
+      const d = await rbGet('/track', { ids: g.join(',') }).catch(() => ({ content: [] }));
+      for (const t of d.content || []) {
+        const id = idFromHref(t.href);
+        if (id && typeof t.popularity === 'number') result.set(id, t.popularity);
+      }
+    }),
+  );
+  return result;
+}
+
+/** 種曲（最大 5）に似た曲をおすすめ。返り値は簡易トラック（アルバム情報なし） */
+export async function recommend(seedIds, size = 100) {
+  const seeds = seedIds.slice(0, 5);
+  if (!seeds.length) return [];
+  const d = await rbGet('/track/recommendation', { seeds: seeds.join(','), size: Math.min(size, 100) }).catch(() => ({ content: [] }));
+  return (d.content || [])
+    .map((t) => {
+      const id = idFromHref(t.href);
+      if (!id) return null;
+      return {
+        id,
+        uri: `spotify:track:${id}`,
+        name: t.trackTitle,
+        artists: (t.artists || []).slice(0, 1).map((a) => ({ id: idFromHref(a.href), name: a.name })),
+        album: null,
+        durationMs: t.durationMs ?? null,
+        explicit: null,
+        popularity: typeof t.popularity === 'number' ? t.popularity : null,
+        partial: true,
+      };
+    })
+    .filter(Boolean);
+}
+
+// ---------------- Last.fm ----------------
+export const getLastfmKey = () => store.get('spm.lastfmKey', '');
+
+const lfLimit = pLimit(4);
+const lfMemo = new Map();
+
+async function lastfm(method, params) {
+  const key = getLastfmKey();
+  if (!key) return null;
+  const qs = new URLSearchParams({ method, ...params, api_key: key, format: 'json', autocorrect: '1' });
+  const memoKey = qs.toString();
+  if (lfMemo.has(memoKey)) return lfMemo.get(memoKey);
+  const p = lfLimit(async () => {
+    const res = await fetch(`https://ws.audioscrobbler.com/2.0/?${qs}`).catch(() => null);
+    const d = res ? await res.json().catch(() => ({})) : {};
+    if (d.error) {
+      if (d.error === 10 || d.error === 26) throw new Error('Last.fm の API キーが正しくありません（設定を確認してください）');
+      return null;
+    }
+    return d;
+  });
+  lfMemo.set(memoKey, p);
+  p.catch(() => lfMemo.delete(memoKey));
+  return p;
+}
+
+/** 似たアーティスト [{name, match(0-1)}] */
+export async function similarArtists(name, limit = 15) {
+  const d = await lastfm('artist.getsimilar', { artist: name, limit: String(limit) });
+  return (d?.similarartists?.artist || []).map((a) => ({ name: a.name, match: Number(a.match) || 0 }));
+}
+
+/** アーティストの代表曲（再生数順） [{name, artist}] */
+export async function artistTopTracks(name, limit = 10) {
+  const d = await lastfm('artist.gettoptracks', { artist: name, limit: String(limit) });
+  return (d?.toptracks?.track || []).map((t) => ({ name: t.name, artist: t.artist?.name || name }));
+}
+
+/** 曲単位で似ている曲（Last.fm の聴取傾向ベース） [{name, artist, match(0-1)}] */
+export async function similarTracks(artist, track, limit = 100) {
+  const d = await lastfm('track.getsimilar', { artist, track, limit: String(limit) });
+  return (d?.similartracks?.track || [])
+    .map((t) => ({ name: t.name, artist: t.artist?.name, match: Number(t.match) || 0 }))
+    .filter((t) => t.artist);
+}
+
+/** タグ（ジャンル・年代）の定番曲。page は 1 から。 {tracks:[{name, artist}], totalPages} */
+export async function tagTopTracks(tag, page = 1, limit = 50) {
+  const d = await lastfm('tag.gettoptracks', { tag, page: String(page), limit: String(limit) });
+  const tracks = (d?.tracks?.track || []).map((t) => ({ name: t.name, artist: t.artist?.name })).filter((t) => t.artist);
+  const totalPages = Number(d?.tracks?.['@attr']?.totalPages) || 0;
+  return { tracks, totalPages };
+}
+
+// ---------------- Wikidata（Spotify のアーティスト ID → 国） ----------------
+// P1902 = Spotify artist ID, P495 = 起源国, P740 = 結成地, P27 = 国籍, P297 = ISO 国コード
+const WD_KEY = 'spm.wdCountry';
+const wdCache = store.get(WD_KEY, {}); // id -> { o: [起源国・結成国], n: [国籍] }
+const wdLimit = pLimit(2);
+
+/** Spotify アーティスト ID の配列 → キャッシュに国を入れる（見つからなければ空） */
+export async function lookupCountriesById(ids) {
+  const todo = [...new Set(ids.filter((id) => id && !(id in wdCache)))];
+  await Promise.all(
+    chunk(todo, 80).map((g) =>
+      wdLimit(async () => {
+        const values = g.map((id) => `"${id.replace(/[^A-Za-z0-9]/g, '')}"`).join(' ');
+        const query = `SELECT ?sid ?oc ?fc ?nc WHERE { VALUES ?sid { ${values} } ?item wdt:P1902 ?sid .
+          OPTIONAL { ?item wdt:P495 ?o . ?o wdt:P297 ?oc }
+          OPTIONAL { ?item wdt:P740 ?f . ?f wdt:P17 ?fco . ?fco wdt:P297 ?fc }
+          OPTIONAL { ?item wdt:P27 ?n . ?n wdt:P297 ?nc } }`;
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 20000);
+        try {
+          const res = await fetch(`https://query.wikidata.org/sparql?format=json&query=${encodeURIComponent(query)}`, {
+            headers: { Accept: 'application/sparql-results+json' },
+            signal: ctrl.signal,
+          });
+          if (!res.ok) return; // 失敗時はキャッシュしない（次回また調べる）
+          const d = await res.json();
+          const found = new Map();
+          for (const b of d.results?.bindings || []) {
+            const id = b.sid.value;
+            const e = found.get(id) || { o: new Set(), n: new Set() };
+            if (b.oc) e.o.add(b.oc.value);
+            if (b.fc) e.o.add(b.fc.value);
+            if (b.nc) e.n.add(b.nc.value);
+            found.set(id, e);
+          }
+          for (const id of g) {
+            const e = found.get(id);
+            wdCache[id] = e ? { o: [...e.o], n: [...e.n] } : { o: [], n: [] };
+          }
+        } catch {
+          /* タイムアウトなどは無視 */
+        } finally {
+          clearTimeout(timer);
+        }
+      }),
+    ),
+  );
+  store.set(WD_KEY, wdCache);
+}
+
+/** キャッシュ済みの国コード配列（起源国を優先し、なければ国籍）。未調査なら undefined */
+export function cachedCountriesById(id) {
+  const e = wdCache[id];
+  if (!e) return undefined;
+  return e.o.length ? e.o : e.n;
+}
+
+// ---------------- MusicBrainz ----------------
+const MB = 'https://musicbrainz.org/ws/2';
+const MB_CACHE_KEY = 'spm.mbCountry2';
+const mbCache = store.get(MB_CACHE_KEY, {});
+let mbChain = Promise.resolve();
+let mbLast = 0;
+
+// MusicBrainz は 1 秒 1 リクエストの制限があるので直列化する
+function mbFetch(path, params) {
+  const run = async () => {
+    const wait = mbLast + 1100 - Date.now();
+    if (wait > 0) await sleep(wait);
+    mbLast = Date.now();
+    const res = await fetch(`${MB}${path}?${new URLSearchParams({ ...params, fmt: 'json' })}`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (res.status === 503) {
+      await sleep(1500);
+      mbLast = Date.now();
+      const r2 = await fetch(`${MB}${path}?${new URLSearchParams({ ...params, fmt: 'json' })}`);
+      return r2.ok ? r2.json() : null;
+    }
+    return res.ok ? res.json() : null;
+  };
+  const p = mbChain.then(run, run);
+  mbChain = p.catch(() => {});
+  return p;
+}
+
+// 地域（国・都道府県・都市）から ISO 国コードを取り出す
+const areaCountry = (area) =>
+  area?.['iso-3166-1-codes']?.[0] || (area?.['iso-3166-2-codes']?.[0] || '').slice(0, 2).toUpperCase() || '';
+
+const quote = (s) => `"${String(s).replace(/(["\\])/g, '\\$1')}"`;
+
+/** アーティスト名 → ISO 国コード（不明なら ''） */
+export async function artistCountry(name) {
+  const k = norm(name);
+  if (k in mbCache) return mbCache[k];
+  const d = await mbFetch('/artist/', { query: `artist:${quote(name)}`, limit: '5' }).catch(() => null);
+  let code = '';
+  const list = d?.artists || [];
+  const exact = list.filter((a) => norm(a.name) === k || (a.aliases || []).some((al) => norm(al.name) === k));
+  const best = exact.sort((a, b) => (b.score || 0) - (a.score || 0))[0] || (list[0]?.score === 100 ? list[0] : null);
+  if (best) code = best.country || areaCountry(best.area) || areaCountry(best['begin-area']) || '';
+  if (d) {
+    mbCache[k] = code;
+    store.set(MB_CACHE_KEY, mbCache);
+  }
+  return code;
+}
+
+export const cachedCountry = (name) => mbCache[norm(name)];
+
+/** 国（＋ジャンルタグ）からアーティスト名を探す */
+export async function artistsByCountry(code, tag, limit = 20) {
+  let q = `country:${code}`;
+  if (tag) q += ` AND tag:${quote(tag)}`;
+  const d = await mbFetch('/artist/', { query: q, limit: String(limit) }).catch(() => null);
+  const names = [];
+  for (const a of d?.artists || []) {
+    names.push(a.name);
+    mbCache[norm(a.name)] = a.country || code;
+  }
+  store.set(MB_CACHE_KEY, mbCache);
+  return names;
+}

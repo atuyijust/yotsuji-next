@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f1012" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Forge" />
+    <link rel="manifest" href="manifest.json" />
+    <link rel="apple-touch-icon" href="../apple-touch-icon.png" />
+    <title>Playlist Forge</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M4 18V6h2v12H4Zm4 0V9h2v9H8Zm4 0V4h2v14h-2Zm4 0v-7h2v7h-2Zm4 0v-4h2v4h-2Z"/></svg>
+        </span>
+        <span><span class="wide">Playlist </span>Forge</span>
+      </div>
+      <div class="topbar-right">
+        <a id="link-next" class="btn btn-ghost" href="../" hidden title="四辻 NEXT（選曲アシスト）を開く">四辻 NEXT</a>
+        <span id="user" class="muted"></span>
+        <button id="btn-login" class="btn btn-primary"><span class="wide">Spotify で</span>ログイン</button>
+        <button id="btn-logout" class="btn btn-ghost" hidden>ログアウト</button>
+        <button id="btn-settings" class="btn btn-ghost" title="設定">設定</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <!-- 条件 -->
+      <section class="panel form-panel">
+        <div class="form-head">
+          <h2>条件</h2>
+          <button id="btn-reset" class="btn btn-ghost btn-sm" type="button">条件をリセット</button>
+        </div>
+        <div class="ask">
+          <label for="nl-input" class="ask-label">文章で指定する</label>
+          <div class="ask-row">
+            <textarea id="nl-input" rows="2" placeholder="例：ドライブにぴったりな1980年代の洋楽をメインにしたプレイリスト"></textarea>
+            <button id="btn-nl" class="btn btn-primary">条件に変換</button>
+          </div>
+          <p id="nl-note" class="note" hidden></p>
+        </div>
+
+        <details class="group" open>
+          <summary>曲の集め方</summary>
+          <div class="field">
+            <label>ジャンル</label>
+            <div class="chips" id="genres"></div>
+            <input id="genre-input" list="genre-list" placeholder="ジャンルを入力して Enter（例: city pop）" />
+            <datalist id="genre-list"></datalist>
+          </div>
+          <div class="field">
+            <label>似せたい曲</label>
+            <div class="chips" id="seed-tracks"></div>
+            <div class="autocomplete">
+              <input id="track-input" placeholder="曲名・アーティスト名で検索（例: Cramp Your Style Breakestra）" autocomplete="off" />
+              <ul id="track-suggest" class="suggest" hidden></ul>
+            </div>
+            <p class="hint">その曲と一緒によく聴かれている曲と、音の傾向が近い曲を集めます。</p>
+          </div>
+          <div class="field">
+            <label>似せたいアーティスト</label>
+            <div class="chips" id="seeds"></div>
+            <div class="autocomplete">
+              <input id="artist-input" placeholder="アーティスト名で検索" autocomplete="off" />
+              <ul id="artist-suggest" class="suggest" hidden></ul>
+            </div>
+            <div class="seg" id="seed-mode" role="radiogroup">
+              <label><input type="radio" name="seedMode" value="similar" checked /> 本人以外の似たアーティスト</label>
+              <label><input type="radio" name="seedMode" value="include" /> 本人＋似たアーティスト</label>
+              <label><input type="radio" name="seedMode" value="only" /> 本人の曲だけ</label>
+            </div>
+          </div>
+          <div class="field">
+            <label>レーベル</label>
+            <div class="chips" id="labels"></div>
+            <input id="label-input" placeholder="レーベル名を入力して Enter（例: Motown）" />
+          </div>
+          <div class="field">
+            <label for="keywords">キーワード</label>
+            <input id="keywords" placeholder="曲名・アルバム名に含まれる語で絞り込む（任意）" />
+          </div>
+          <label class="check"><input type="checkbox" id="use-mytop" /> 自分がよく聴く曲をもとに似た曲を探す</label>
+        </details>
+
+        <details class="group" open>
+          <summary>絞り込み</summary>
+          <div class="field">
+            <label>リリース時期</label>
+            <div class="row">
+              <input id="year-from" type="number" min="1900" max="2100" placeholder="年" aria-label="開始年" />
+              <select id="month-from" class="month" aria-label="開始月"><option value="">月</option><option value="1">1月</option><option value="2">2月</option><option value="3">3月</option><option value="4">4月</option><option value="5">5月</option><option value="6">6月</option><option value="7">7月</option><option value="8">8月</option><option value="9">9月</option><option value="10">10月</option><option value="11">11月</option><option value="12">12月</option></select>
+              <span class="muted">〜</span>
+              <input id="year-to" type="number" min="1900" max="2100" placeholder="年" aria-label="終了年" />
+              <select id="month-to" class="month" aria-label="終了月"><option value="">月</option><option value="1">1月</option><option value="2">2月</option><option value="3">3月</option><option value="4">4月</option><option value="5">5月</option><option value="6">6月</option><option value="7">7月</option><option value="8">8月</option><option value="9">9月</option><option value="10">10月</option><option value="11">11月</option><option value="12">12月</option></select>
+            </div>
+            <p class="hint">月は任意です。月まで指定すると、リリース月が分からない曲は境目の年から除きます。</p>
+            <div class="quick" id="decades"></div>
+          </div>
+          <div class="field">
+            <label>アーティストの国（含める）</label>
+            <div class="chips" id="countries"></div>
+            <select id="country-select"><option value="">＋ 国を追加</option></select>
+          </div>
+          <div class="field">
+            <label>アーティストの国（除外する）</label>
+            <div class="chips" id="ex-countries"></div>
+            <select id="ex-country-select"><option value="">＋ 除外する国を追加</option></select>
+            <p class="hint">国の判定は MusicBrainz を使うため、少し時間がかかります（1 秒に 1 アーティスト）。</p>
+          </div>
+          <div class="field">
+            <label>曲の長さ（分）</label>
+            <div class="row">
+              <input id="dur-min" type="number" min="0" step="0.5" placeholder="最短" />
+              <span class="muted">〜</span>
+              <input id="dur-max" type="number" min="0" step="0.5" placeholder="最長" />
+            </div>
+          </div>
+          <div class="field">
+            <label>除外するアーティスト</label>
+            <div class="chips" id="ex-artists"></div>
+            <input id="ex-artist-input" placeholder="名前を入力して Enter" />
+          </div>
+          <label class="check"><input type="checkbox" id="ex-explicit" /> 露骨な表現（Explicit）の曲を除く</label>
+        </details>
+
+        <details class="group" open>
+          <summary>サウンド</summary>
+          <div class="quick" id="moods"></div>
+          <div id="features"></div>
+          <div class="field">
+            <label>調</label>
+            <div class="seg">
+              <label><input type="radio" name="mode" value="any" checked /> どちらでも</label>
+              <label><input type="radio" name="mode" value="major" /> メジャー（明るい調）</label>
+              <label><input type="radio" name="mode" value="minor" /> マイナー（暗い調）</label>
+            </div>
+          </div>
+          <label class="check"><input type="checkbox" id="half-double" checked /> BPM は倍・半分も同じテンポとみなす</label>
+          <label class="check"><input type="checkbox" id="require-features" checked /> 特徴量データがない曲は除く</label>
+        </details>
+
+        <details class="group" open>
+          <summary>出力</summary>
+          <div class="grid2">
+            <div class="field">
+              <label for="size">曲数</label>
+              <input id="size" type="number" min="5" max="200" value="200" />
+            </div>
+            <div class="field">
+              <label for="max-per-artist">1 アーティストあたり最大</label>
+              <input id="max-per-artist" type="number" min="1" max="20" value="2" />
+            </div>
+            <div class="field">
+              <label for="order">並び順</label>
+              <select id="order"></select>
+            </div>
+            <div class="field">
+              <label for="depth">探す範囲</label>
+              <select id="depth">
+                <option value="1">狭い（速い）</option>
+                <option value="2" selected>ふつう</option>
+                <option value="3">広い（時間がかかる）</option>
+              </select>
+            </div>
+          </div>
+        </details>
+
+        <div class="presets">
+          <select id="preset-select"><option value="">保存した条件を読み込む</option></select>
+          <button id="btn-save-preset" class="btn btn-ghost">条件を保存</button>
+          <button id="btn-delete-preset" class="btn btn-ghost" hidden>削除</button>
+        </div>
+
+        <div class="sticky-action">
+          <button id="btn-generate" class="btn btn-primary btn-lg">曲を探す</button>
+        </div>
+      </section>
+
+      <!-- 結果 -->
+      <section class="panel result-panel">
+        <div id="empty" class="empty">
+          <h2>条件を決めて「曲を探す」</h2>
+          <p>文章でざっくり指定してから、細かい条件を調整するのがおすすめです。</p>
+        </div>
+        <div id="progress" class="progress" hidden>
+          <div class="bar"><div id="progress-bar"></div></div>
+          <p id="progress-text"></p>
+        </div>
+        <div id="error" class="error" hidden></div>
+        <div id="result" hidden>
+          <div class="result-head">
+            <input id="pl-name" class="pl-name" placeholder="プレイリスト名" />
+            <textarea id="pl-desc" rows="2" placeholder="説明（任意）"></textarea>
+            <div class="row wrap">
+              <div class="vis" role="radiogroup" aria-label="公開設定">
+                <label><input type="radio" name="plVisibility" value="private" checked /><span>非公開</span></label>
+                <label><input type="radio" name="plVisibility" value="public" /><span>公開</span></label>
+              </div>
+              <span id="stats" class="muted"></span>
+              <span class="spacer"></span>
+              <select id="reorder" title="並び替え"></select>
+              <button id="btn-regen" class="btn btn-ghost">作り直す</button>
+              <button id="btn-save" class="btn btn-primary">Spotify に保存</button>
+            </div>
+            <p id="gen-note" class="note" hidden style="white-space:pre-line"></p>
+            <p id="saved" class="note" hidden></p>
+          </div>
+          <ol id="tracks" class="tracks"></ol>
+        </div>
+      </section>
+    </main>
+
+    <div id="player" class="player" hidden>
+      <iframe id="player-frame" title="Spotify プレーヤー" allow="autoplay; clipboard-write; encrypted-media" loading="lazy"></iframe>
+      <button id="player-close" class="btn btn-ghost" aria-label="閉じる">×</button>
+    </div>
+
+    <dialog id="settings">
+      <form method="dialog" class="settings">
+        <h2>設定</h2>
+        <label>Spotify Client ID（必須）
+          <input id="set-client" autocomplete="off" />
+        </label>
+        <p class="hint">Spotify Developer Dashboard のアプリ設定で、Redirect URI に <code id="redirect-uri"></code> を追加してください。</p>
+        <label>Last.fm API キー（似たアーティスト検索に使用・推奨）
+          <input id="set-lastfm" autocomplete="off" />
+        </label>
+        <p class="hint">無料で取得できます：<a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener">last.fm/api/account/create</a></p>
+        <label>Claude API キー（文章での指定を高精度にする・任意）
+          <input id="set-claude" type="password" autocomplete="off" />
+        </label>
+        <p class="hint">未設定でも文章入力は使えます（簡易解析）。キーはこのブラウザ内にだけ保存されます。</p>
+        <div class="row end">
+          <button value="cancel" class="btn btn-ghost">キャンセル</button>
+          <button id="set-save" value="save" class="btn btn-primary">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" hidden></div>
+
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>
