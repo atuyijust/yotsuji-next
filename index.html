@@ -208,6 +208,7 @@
     dialog{height:100dvh;max-height:100dvh;padding-top:env(safe-area-inset-top)}
     dialog .in{max-height:calc(100dvh - 60px - env(safe-area-inset-top) - env(safe-area-inset-bottom))}
     dialog .ft{padding-bottom:calc(10px + env(safe-area-inset-bottom))}
+    #dlgSetup{height:auto;max-height:100dvh;top:0;bottom:auto}
   }
 </style>
 </head>
@@ -285,6 +286,19 @@
   </section>
 </main>
 
+<dialog id="dlgSetup">
+  <div class="in">
+    <h2>はじめに</h2>
+    <p>Mac の四辻 NEXT で <b>「ライブラリ」→「iPhoneへ設定を渡す」</b> を押してから、下のボタンを押してください。Macと同じ曲・BPM・タグがそのまま使えます。</p>
+    <button id="setupPaste" class="pri" style="width:100%;padding:12px;font-size:16px">設定を貼り付ける</button>
+    <div id="setupManual" hidden style="margin-top:10px"><p class="muted">うまく読めないときは、ここに長押しで貼り付けてください</p>
+      <textarea id="setupText" rows="3" style="width:100%;box-sizing:border-box;font:12px var(--mono)" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
+      <button id="setupApply" style="margin-top:6px">これで設定する</button></div>
+    <div class="muted" id="setupMsg" style="margin-top:8px"></div>
+  </div>
+  <div class="ft"><button id="setupSelf">自分で設定する</button><button id="setupClose">あとで</button></div>
+</dialog>
+
 <dialog id="dlgLib">
   <div class="in">
     <h2>1. Spotify接続設定</h2>
@@ -334,6 +348,10 @@
       <button id="syncPush">今すぐ送る</button><button id="syncPull">今すぐ受け取る</button>
       <label class="ck"><input type="checkbox" id="autoSync" checked> 自動で同期</label>
       <span class="muted" id="syncMsg"></span>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
+      <button id="setupCopy" class="pri">iPhoneへ設定を渡す</button>
+      <span class="muted">Client ID と同期のトークンをコピーします。iPhone で四辻 NEXT を開き「設定を貼り付ける」を押すだけで、Macと同じ状態になります（同じApple IDのユニバーサルクリップボード）</span>
     </div>
 
     <h2>6. バックアップ（ファイル）</h2>
@@ -1588,6 +1606,25 @@ document.addEventListener("click",e=>{
   else if(b.dataset.q) queue(b.dataset.q); else if(b.dataset.p) play(b.dataset.p); else if(b.dataset.n){ setNow(b.dataset.n); $("#sres").innerHTML=""; $("#q").value=""; }
 });
 $("#btnLib").onclick=openLib; $("#closeLib").onclick=()=>{ saveSel(); $("#dlgLib").close(); };
+// ---------- 設定の受け渡し（Mac → iPhone）: Client ID と GitHub トークンを1つの文字列にしてクリップボードで渡す ----------
+const SETUP_PRE="yotsuji-setup:";
+async function setupCopy(){ const cid=LS.get("cid",""), gt=LS.get("ghTok","");
+  if(!cid && !gt){ toast("この端末にはまだ設定がありません"); return; }
+  const txt=SETUP_PRE+btoa(unescape(encodeURIComponent(JSON.stringify({v:1,cid,gh:gt}))));
+  try{ await navigator.clipboard.writeText(txt); }catch{ const ta=document.createElement("textarea"); ta.value=txt; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); }
+  toast("コピーしました。iPhoneで四辻 NEXT を開いて「設定を貼り付ける」を押してください"+(gt?"":"（同期のトークンが無いので、曲データは渡りません）")); }
+async function setupApply(txt){ const m=String(txt||"").trim().match(/yotsuji-setup:([A-Za-z0-9+/=]+)/);
+  if(!m){ $("#setupMsg").textContent="設定の文字列が見つかりません。Macで「iPhoneへ設定を渡す」を押してから、もう一度どうぞ"; $("#setupManual").hidden=false; return false; }
+  let d; try{ d=JSON.parse(decodeURIComponent(escape(atob(m[1])))); }catch{ $("#setupMsg").textContent="設定の文字列が壊れています。もう一度コピーしてください"; return false; }
+  if(d.cid) LS.set("cid",d.cid); if(d.gh){ LS.set("ghTok",d.gh); LS.set("gistId",""); LS.set("libGistId",""); }
+  $("#setupMsg").textContent=d.gh?"設定しました。Macのデータを受け取っています…":"Client ID を設定しました";
+  if(d.gh){ await syncPull(true); }
+  $("#dlgSetup").close(); toast(d.gh?"Macと同じデータになりました。再生ボタンを使うときだけ「Spotifyに接続」を押してください":"設定しました"); refresh(); return true; }
+$("#setupCopy").onclick=setupCopy;
+$("#setupPaste").onclick=async()=>{ let t=""; try{ t=await navigator.clipboard.readText(); }catch{ $("#setupMsg").textContent="クリップボードを読めませんでした"; $("#setupManual").hidden=false; return; } setupApply(t); };
+$("#setupApply").onclick=()=>setupApply($("#setupText").value);
+$("#setupSelf").onclick=()=>{ $("#dlgSetup").close(); openLib(); };
+$("#setupClose").onclick=()=>$("#dlgSetup").close();
 $("#saveCid").onclick=()=>{ LS.set("cid",$("#cid").value.trim()); toast("Client ID を保存しました"); };
 $("#btnLogin").onclick=login;
 $("#loadPls").onclick=()=>loadPlaylistIndex().catch(e=>$("#scanMsg").textContent=e.message);
@@ -1673,7 +1710,7 @@ $("#autoInfo").checked=LS.get("autoInfo",true); $("#autoInfo").onchange=e=>{ LS.
   if(!authed && !authErr && tryAutoLogin()) return;
   if(authed){ LS.set("hadLogin",true); $("#btnLogin").textContent="接続済み"; try{ S.me=await api("/me"); setStatus(`${S.me.display_name||S.me.id} / 曲 ${Object.keys(S.tracks).length} / PL ${S.playlists.length}`);}catch(e){ setStatus(e.message); }
     if(LS.get("follow",true) && !LS.get("dj",false)){ $("#follow").checked=true; setFollow(true); } }
-  if(!S.playlists.length && !LS.get("cid","")) openLib();
+  if(!S.playlists.length && !LS.get("ghTok","")) $("#dlgSetup").showModal(); else if(!S.playlists.length && !LS.get("cid","")) openLib();
   refresh(); loadGenreMap();
   if(S.now && LS.get("autoInfo",true)) gatherInfo(S.now);
   // 曲データ同期を入れる前から使っている端末: 最後に読み込んだ時刻を曲データの時刻にする（新しく読み込んだ端末の方が勝つ）
