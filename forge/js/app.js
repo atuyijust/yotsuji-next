@@ -3,6 +3,7 @@ import { generate, orderTracks } from './engine.js';
 import { parseRequest, getClaudeKey } from './nl.js';
 import { FEATURES, GENRES, COUNTRIES, COUNTRY_NAME, MOODS, ORDERS, THEMES, themeOf } from './data.js';
 import { store, esc, norm } from './util.js';
+import * as keySync from './sync.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -688,7 +689,12 @@ function setupSettings() {
     store.set('spm.clientId', $('#set-client').value.trim());
     store.set('spm.lastfmKey', $('#set-lastfm').value.trim());
     store.set('spm.claudeKey', $('#set-claude').value.trim());
-    toast('設定を保存しました');
+    if (keySync.canSync()) {
+      keySync
+        .pushKeys()
+        .then((ok) => toast(ok ? '設定を保存しました。四辻 NEXT の同期で、ほかの端末（iPhone など）にも入ります' : '設定を保存しました'))
+        .catch((e) => toast(`設定を保存しました（ほかの端末への共有に失敗：${e.message}）`));
+    } else toast('設定を保存しました');
   });
 }
 
@@ -865,7 +871,32 @@ function init() {
       applyPendingSeed();
     });
 
-  if (!sp.getClientId()) setTimeout(openSettings, 300);
+  // ほかの端末で入れた API キーを受け取る／この端末のキーを共有する（四辻 NEXT の同期を使う。設定画面を開かずに済むように）
+  syncKeysOnOpen().finally(() => {
+    // Client ID が分かっていて未ログインなら、そのまま Spotify のログインへ（タブごとに 1 回だけ）
+    if (!sp.isLoggedIn() && sp.getClientId() && !backFromLogin && !sessionStorage.getItem('spm.autoLogin')) {
+      sessionStorage.setItem('spm.autoLogin', '1');
+      store.set('spm.lastCriteria', collectCriteria());
+      sp.login().catch((e) => showError(e));
+      return;
+    }
+    if (!sp.getClientId()) setTimeout(openSettings, 300);
+  });
+}
+
+async function syncKeysOnOpen() {
+  if (!keySync.canSync()) return;
+  try {
+    const n = await keySync.pullKeys();
+    if (n) toast('ほかの端末の設定（API キー）を受け取りました');
+    // この端末にしかないキーがあれば共有しておく（送った内容が変わったときだけ）
+    const sig = [store.get('spm.lastfmKey', ''), store.get('spm.claudeKey', '')].join('|');
+    if (sig !== '|' && store.get('spm.keysSent', '') !== sig) {
+      if (await keySync.pushKeys()) store.set('spm.keysSent', sig);
+    }
+  } catch (e) {
+    console.warn('[playlist-forge] key sync', e);
+  }
 }
 
 // 四辻 NEXT から渡された曲を「似せたい曲」に入れる（未ログインならログイン後に）

@@ -57,6 +57,7 @@ Spotify（人気度・レーベル・リリース・アーティストのジャ�
 ## 同期・保存
 - IndexedDB "yotsuji-next" store "kv"（`DB.get/set`）: tracks, meta, dz, dg, rb, ex, plIndex。localStorage（`LS`）: cid, tok, now, hist, weights, 各設定
 - GitHub Gist 同期（`syncPush/syncPull/mergeMeta`）: ファイル `yotsuji-next-sync.json`、トークンは LS `ghTok`（UIで入力、コードに書かない）。meta は SRC_RANK の高い方を採用してマージ。Client ID（PKCEなので秘密ではない）も載せ、空の端末に入れる
+- 設定の受け渡し（ユーザー指定「iPhoneで設定を入れるのがだるい」）: Mac のライブラリ画面 5 の「iPhoneへ設定を渡す」(`setupCopy`) が `yotsuji-setup:`+base64(JSON{cid,gh}) をクリップボードへ（ユニバーサルクリップボードで iPhone に届く）。曲もトークンも無い端末は起動時に `#dlgSetup`「はじめに」を出し、「設定を貼り付ける」で `navigator.clipboard.readText` → `setupApply`（cid・ghTok を入れて `syncPull(true)`、曲データも受け取る）。読めなければ貼り付け欄。「自分で設定する」で従来のライブラリ画面。トークンはコードやURLに載せない
 - 曲データ同期（ユーザー指定「Macと同じデータをiPhoneで」）: 別の非公開Gist `yotsuji-next-library.json`（`findLibGist`/`libPush`/`libPull`）。tracks（配列に詰め、画像URLの共通部分は `~`）・playlists・saved・plIndex・ag・af・rb。大きいので LS `libStamp`（ライブラリが変わった時刻: scan完了・agFillで取得・ReccoBeatsで20曲以上）が `libSent` より新しいときだけ送る。同期データの `libAt` が自分の `libStamp` より新しいときだけ受け取る（受け取ったら trackVer も揃え、全PL読み直しを起こさない）。同期導入前の端末は起動時に libStamp=libAt（最後に読み込んだ時刻）
 
 ## 自動化（「極力自動で」の方針）
@@ -86,6 +87,8 @@ Spotify（人気度・レーベル・リリース・アーティストのジャ�
 - 同じサイトなので localStorage を共有する: Client ID は Forge の `spm.clientId` が空なら四辻 NEXT の `cid` を使う。トークンは別々（スコープが違うため）
 - 連携: 四辻 NEXT のヘッダー「プレイリスト作成 ↗」、デッキの「似た曲でプレイリスト ↗」（`forge/?seedTrack=曲ID` を別タブ `forge` で開く → Forge が「似せたい曲」に入れる。未ログインならログイン後に）
 - Forge の右上「四辻 NEXT」で戻る（パスが `/forge/` のときだけ表示）
+- 設定の共有: Forge の Last.fm / Claude の API キーは、四辻 NEXT の同期 Gist（`yotsuji-next-sync.json` がある Gist）に別ファイル `playlist-forge-settings.json` として置く（`forge/js/sync.js`、ユーザー指定）。四辻 NEXT の `ghTok` / `gistId` をそのまま使う。開いたとき、この端末に無いキーだけ受け取り、この端末のキーが変わっていれば送る
+- Forge は Client ID が分かっていて未ログインなら、開いたときに自動で Spotify ログインへ（タブごとに 1 回、sessionStorage `spm.autoLogin`）
 
 ## やらないこと
 - 第三者APIキーのコード埋め込み
