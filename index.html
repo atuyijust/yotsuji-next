@@ -66,6 +66,7 @@
   @media (max-width:760px){ #toTop{right:14px;bottom:16px} }
   .cand .sub{font:11px var(--mono);color:var(--dim);margin-top:1px}
   .cand .sub .yr.g{color:var(--accent);font-weight:600} .cand .sub .yr.y{color:var(--accent2)}
+  .cand .sub .cc{white-space:nowrap} #deck .a .cc{color:var(--dim);font-size:.9em;white-space:nowrap}
   .cand .sub .gen{color:var(--accent2)} .cand .sub .af{cursor:help}
   .gp{display:inline-block;font:600 11px/1.5 system-ui,sans-serif;padding:0 7px;border-radius:9px;margin-left:5px;vertical-align:2px;white-space:nowrap;
     color:hsl(var(--h) 70% 72%);background:hsl(var(--h) 45% 20% / .55);border:1px solid hsl(var(--h) 45% 38%)}
@@ -333,6 +334,7 @@ const S = {
   meta:{},          // id -> {bpm,key,genre,src}
   dz:{},            // Deezer問い合わせ済み id -> bpm(0=不明)
   dg:{},            // Discogs情報 id -> {genre,style,label,year,url} / null=見つからず
+  ac:{},            // アーティストの国 artistId -> {c:"JP"(""=不明), at}（MusicBrainz、まとめて取得）
   ag:{},            // アーティストのSpotifyジャンル artistId -> {g:[...], at}（まとめて取得、30日ごと）
   tags:{},          // 自分で付けたタグ id -> {t:["ピーク",...], at:更新時刻}（Gistで同期、新しい方が勝つ）
   ex:{},            // 自動収集した曲情報 id -> {at,done,sp,dz,mb,wk}
@@ -738,7 +740,7 @@ function renderDeck(force){
   const m=S.meta[t.id]||{};
   const undo=S.hist.length?`<button class="sm" data-undo title="ひとつ前のNowに戻す（U）">↶ 戻す</button>`:"";
   $("#mobileNow").innerHTML=`<b>NOW</b>${esc(t.name)} <span class="muted">— ${esc(arts(t))}</span><span class="m">${m.bpm?m.bpm.toFixed(1):"—"} ${m.key||""}</span>${undo?" "+undo:""}`;
-  $("#deck").innerHTML=`<div class="row"><img src="${esc(t.img)}" alt=""><div><div class="t">${esc(t.name)}${t.na?` <span class="na" title="Spotifyで再生できない曲（配信停止・地域制限など）。候補には出しません">リンク切れ</span>`:""}</div><div class="a">${esc(arts(t))}</div>${(()=>{ const gl=genreList(t.id,labelMap()); return gl.length?`<div class="gps">${gl.slice(0,4).map(x=>genrePill(x,true)).join("")}</div>`:""; })()}<div class="muted">${esc(t.album)} ${t.year||""}</div></div></div>
+  $("#deck").innerHTML=`<div class="row"><img src="${esc(t.img)}" alt=""><div><div class="t">${esc(t.name)}${t.na?` <span class="na" title="Spotifyで再生できない曲（配信停止・地域制限など）。候補には出しません">リンク切れ</span>`:""}</div><div class="a">${esc(arts(t))}${(()=>{ const cc=countriesOf(t.id); return cc.length?` <span class="cc" title="アーティストの国（MusicBrainz）">${cc.map(c=>esc(ccText(c))).join(" / ")}</span>`:""; })()}</div>${(()=>{ const gl=genreList(t.id,labelMap()); return gl.length?`<div class="gps">${gl.slice(0,4).map(x=>genrePill(x,true)).join("")}</div>`:""; })()}<div class="muted">${esc(t.album)} ${t.year||""}</div></div></div>
    <div class="bk"><span class="big">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="muted">BPM</span><span class="big k">${m.key||"—"}</span><span class="muted">${m.genre?esc(m.genre):""} ${m.src?"("+(SRC_LABEL[m.src]||m.src)+(m.kSrc&&m.kSrc!==m.src?" / キー: "+(SRC_LABEL[m.kSrc]||m.kSrc):"")+(m.bSrc&&m.bSrc!==m.src?" / BPM: "+(SRC_LABEL[m.bSrc]||m.bSrc):"")+")":""}${m.src==="rekordbox"&&m.rbName&&norm(m.rbName)!==norm(t.name)?` <span class="muted" title="rekordbox のこの曲と照合しました">← rekordbox「${esc(m.rbName)}」</span>`:""}</span></div>
    <div class="bk"><input id="eBpm" placeholder="BPM" value="${m.bpm||""}"><input id="eKey" placeholder="キー 8A/Am" value="${m.key||""}"><button class="sm" id="saveMeta">保存</button><button class="sm" id="tap">TAP</button><button class="sm" data-p="${t.id}" title="Spotifyで再生">▶ 再生</button><button class="sm" data-c="${t.id}" title="曲名をコピー">⎘ コピー</button><button class="sm" data-lyr="${t.id}" title="曲名とアーティスト名で歌詞を検索（別のタブで開く。アプリでは歌詞を取得しない）">歌詞 ↗</button>${undo}<span class="muted" id="tapv"></span></div>
    <div class="tags" id="deckTags">${tagsOf(t.id).map(x=>`<span class="chip tag">#${esc(x)}<button data-deltag="${esc(x)}" title="外す">×</button></span>`).join("")}<input id="tagIn" placeholder="＋タグ（T）" list="tagList" autocomplete="off"><datalist id="tagList">${[...new Set([...allTags(),...PRESET_ALL])].map(x=>`<option value="${esc(x)}">`).join("")}</datalist>${allTags().filter(x=>!tagsOf(t.id).includes(x)).slice(0,6).map(x=>`<span class="chip sug" data-addtag="${esc(x)}" title="このタグを付ける">＋${esc(x)}</span>`).join("")}</div>
@@ -771,7 +773,7 @@ function labelOf(id,lm){ const e=S.ex[id], t=S.tracks[id];
   return e?.sp?.label || e?.dz?.album?.label || (t?.albumId&&lm[t.albumId]) || S.meta[id]?.af?.lbl || S.dg[id]?.label?.[0] || ""; }
 const cut=(x,n)=>x.length>n?x.slice(0,n-1)+"…":x;
 function subLine(id,lm,yv){ const t=S.tracks[id], a=S.meta[id]?.af; const p=[], q=[];
-  const yr=yearOf(id); if(t.dur) p.push(fmtDur(t.dur)); if(yr) p.push(yv?`<span class="yr ${yv[0]}" title="${yv[1]}（加点）">${yr}</span>`:yr); if(t.pop!=null) p.push("POP "+t.pop); const l=labelOf(id,lm); if(l) p.push(esc(cut(l,28)));
+  const yr=yearOf(id); if(t.dur) p.push(fmtDur(t.dur)); if(yr) p.push(yv?`<span class="yr ${yv[0]}" title="${yv[1]}（加点）">${yr}</span>`:yr); const cc=countriesOf(id); if(cc.length) p.push(`<span class="cc" title="アーティストの国（MusicBrainz）">${cc.slice(0,2).map(c=>esc(ccText(c))).join(" / ")}</span>`); if(t.pop!=null) p.push("POP "+t.pop); const l=labelOf(id,lm); if(l) p.push(esc(cut(l,28)));
   if(a && (a.en!=null||a.da!=null||a.va!=null)){ const f=v=>v==null?"–":Math.round(v*100);
     q.push(`<span class="af" title="エネルギー / ダンス度 / 明るさ（0〜100）">E${f(a.en)} D${f(a.da)} V${f(a.va)}</span>`); }
   return (p.length?`<div class="sub">${p.join(" · ")}</div>`:"")+(q.length?`<div class="sub">${q.join(" · ")}</div>`:""); }
@@ -999,9 +1001,43 @@ async function agFill(){ if(agRunning || !(await token())) return 0; agRunning=t
       if(i%500===450){ DB.set("ag",S.ag); renderCands(true); } await sleep(150); }
     await DB.set("ag",S.ag); if(got){ libTouch(); autoSync(); } if(ids.length){ renderCands(true); renderDeck(); if(ids.length>100) setStatus(`アーティストのジャンル：${got}組を取得しました`); }
   }finally{ agRunning=false; } return got; }
+// アーティストの国: MusicBrainz（キー不要・CORS可・1回/秒）。まず Spotify のアーティストURLで100組ずつ照会し、
+// 登録の無いアーティストだけ名前で検索（同じ名前で国の違う候補がある＝別人かもしれないときは不明のまま）。不明は30日、分かったものは180日で聞き直す
+const AC_TTL=1000*60*60*24*180, AC_RETRY=1000*60*60*24*30; let acRunning=false;
+async function acFill(){ if(acRunning) return 0; acRunning=true; let got=0;
+  const mbf=async u=>{ for(let k=0;k<3;k++){ const x=await fetch(u,{headers:{Accept:"application/json"}}).catch(()=>null); if(x?.ok) return x.json(); if(x && x.status!==503) return null; await sleep(3000); } return null; };
+  try{ const now=Date.now(), need=new Map();
+    for(const t of Object.values(S.tracks)) for(const a of t.artists||[]){ const v=S.ac[a.id]; if(a.id && !(v && now-v.at<(v.c?AC_TTL:AC_RETRY))) need.set(a.id,a.name); }
+    const ids=[...need.keys()], miss=[]; let saved=0;
+    const save=()=>{ DB.set("ac",S.ac); renderCands(true); renderDeck(); };
+    for(let i=0;i<ids.length;i+=100){ const part=ids.slice(i,i+100);
+      if(ids.length>100) setStatus(`アーティストの国を取得中… ${Math.min(i+100,ids.length)}/${ids.length}`);
+      const j=await mbf("https://musicbrainz.org/ws/2/url?fmt=json&inc=artist-rels&"+part.map(x=>"resource="+encodeURIComponent("https://open.spotify.com/artist/"+x)).join("&"));
+      if(j===null && part.length>1){ await sleep(1100); continue; }
+      const found={}; for(const u of j?.urls||(j?.resource?[j]:[])){ const aid=(u.resource||"").split("/artist/")[1]; const c=(u.relations||[]).map(r=>r.artist?.country).find(Boolean); if(aid && c) found[aid]=c; }
+      for(const aid of part){ if(found[aid]){ S.ac[aid]={c:found[aid],at:now}; got++; } else miss.push(aid); }
+      await sleep(1100); }
+    if(got) save();
+    for(let i=0;i<miss.length;i++){ const aid=miss[i], name=need.get(aid)||"";
+      if(miss.length>20 && i%10===0) setStatus(`アーティストの国を名前で検索中… ${i}/${miss.length}`);
+      const j=await mbf(`https://musicbrainz.org/ws/2/artist?fmt=json&limit=10&query=${encodeURIComponent(`artist:"${name.replace(/"/g,"")}"`)}`);
+      if(j===null){ await sleep(1100); continue; }
+      const same=(j.artists||[]).filter(x=>x.score>=90 && norm(x.name)===norm(name)), cs=new Set(same.map(x=>x.country||""));
+      const c=same.length && cs.size===1 ? [...cs][0] : "";
+      S.ac[aid]={c,at:now}; if(c) got++;
+      if(++saved%50===0) save(); await sleep(1100); }
+    save(); if(got){ libTouch(); autoSync(); } if(ids.length>100) setStatus(`アーティストの国：${got}組を取得しました`);
+  }finally{ acRunning=false; } return got; }
+// 国コード → 旗と日本語名（長い正式名は短く）
+const CC_SHORT={US:"アメリカ",GB:"イギリス",KR:"韓国",KP:"北朝鮮",CN:"中国",TW:"台湾",RU:"ロシア",CZ:"チェコ",NL:"オランダ",AE:"UAE",ZA:"南アフリカ",NZ:"NZ"};
+const ccDn=(()=>{ try{ return new Intl.DisplayNames(["ja"],{type:"region"}); }catch{ return null; } })();
+function ccName(c){ if(!c) return ""; if(CC_SHORT[c]) return CC_SHORT[c]; if(c==="XW") return "世界"; if(c==="XE") return "ヨーロッパ"; try{ return ccDn?.of(c)||c; }catch{ return c; } }
+const ccFlag=c=>/^[A-Z]{2}$/.test(c||"") && !/^X/.test(c) ? String.fromCodePoint(...[...c].map(x=>0x1F1E6+x.charCodeAt(0)-65)) : "";
+const ccText=c=>c?`${ccFlag(c)}${ccFlag(c)?" ":""}${ccName(c)}`:"";
+function countriesOf(id){ const out=[]; for(const a of S.tracks[id]?.artists||[]){ const c=S.ac[a.id]?.c; if(c && !out.includes(c)) out.push(c); } return out; }
 async function autoMeta(){
   let got=0;
-  agFill();
+  agFill(); acFill();
   if(LS.get("autoRb",true)) got=await rbFill();
   if(LS.get("autoDz",true)) fillBpm(); else if(got) autoSync();
 }
@@ -1182,7 +1218,7 @@ function renderInfo(){
   // アーティスト（Spotify + Wikipedia）
   h+=sec("アーティスト", ex.sp===undefined&&ex.wk===undefined?undefined:(sp||ex.wk||ex.sp)?{}:null, sp?.artists?.[0]?.url, ()=>{
     let s="";
-    for(const a of (sp?.artists||[])){ s+=li("",`<b>${esc(a.name)}</b> <span class="muted">フォロワー ${fmtN(a.followers)} · 人気度 ${a.pop}</span>`+chips(a.genres.slice(0,6))); }
+    for(const a of (sp?.artists||[])){ s+=li("",`<b>${esc(a.name)}</b>${S.ac[a.id]?.c?` ${esc(ccText(S.ac[a.id].c))}`:""} <span class="muted">フォロワー ${fmtN(a.followers)} · 人気度 ${a.pop}</span>`+chips(a.genres.slice(0,6))); }
     if(ex.wk){ s+=`<div class="ex">${esc(ex.wk.extract)}${ex.wk.url?` <a href="${esc(ex.wk.url)}" target="_blank" rel="noopener" style="color:var(--dim)">Wikipedia(${ex.wk.lang}) ↗</a>`:""}</div>`; }
     else if(ex.wk===undefined && auto) s+=`<div class="muted">Wikipedia 取得中…</div>`;
     if(sp?.top?.length){ s+=`<div class="muted" style="margin-top:4px">トップ曲</div>`+sp.top.map((x,i)=>`<div class="vl" data-v="${id}:top:${i}"><span class="pre">${i+1}</span><span>${esc(x.name)}</span><span class="d">${esc(x.album)}</span></div>`).join(""); }
@@ -1270,7 +1306,7 @@ function libTouch(){ LS.set("libStamp",Date.now()); }
 function libPayload(){
   const T=Object.values(S.tracks).map(t=>[t.id,t.name,t.artists.map(a=>[a.id,a.name]),t.album,t.albumId||"",t.dur||0,t.isrc||"",(t.img||"").replace(IMG_PRE,"~"),t.pop??null,t.year||null,t.na?1:0]);
   const af={}; for(const [id,m] of Object.entries(S.meta)) if(m.af){ const o={}; for(const [k,v] of Object.entries(m.af)) if(typeof v==="number") o[k]=Math.round(v*1000)/1000; af[id]=o; }
-  return {v:1, at:LS.get("libStamp",0), tracks:T, playlists:S.playlists, saved:S.saved, plIndex:S.plIndex, ag:S.ag, af, rb:S.rb}; }
+  return {v:1, at:LS.get("libStamp",0), tracks:T, playlists:S.playlists, saved:S.saved, plIndex:S.plIndex, ag:S.ag, ac:S.ac, af, rb:S.rb}; }
 async function libPush(){ const stamp=LS.get("libStamp",0); if(!stamp || stamp<=LS.get("libSent",0) || !Object.keys(S.tracks).length) return;
   syncMsg("同期：曲データを送信中…"); const id=await findLibGist();
   const body={description:"四辻 NEXT 曲データ",public:false,files:{[LIB_FILE]:{content:JSON.stringify(libPayload())}}};
@@ -1285,9 +1321,10 @@ async function libPull(){ const id=await findLibGist(); if(!id) return 0;
     S.tracks[id]={id,uri:"spotify:track:"+id,name,artists:ar.map(([id,name])=>({id,name})),album,albumId,dur,isrc,img:(img||"").replace(/^~/,IMG_PRE),pop,year}; if(na) S.tracks[id].na=1; }
   S.playlists=d.playlists||S.playlists; S.saved=d.saved||S.saved; if(d.plIndex?.length) S.plIndex=d.plIndex;
   for(const [aid,v] of Object.entries(d.ag||{})) if(!S.ag[aid] || (v.at||0)>(S.ag[aid].at||0)) S.ag[aid]=v;
+  for(const [aid,v] of Object.entries(d.ac||{})) if(!S.ac[aid] || (v.at||0)>(S.ac[aid].at||0)) S.ac[aid]=v;
   for(const [id,a] of Object.entries(d.af||{})){ const m=S.meta[id]||(S.meta[id]={}); m.af={...a,...(m.af||{})}; }
   for(const [id,v] of Object.entries(d.rb||{})) if(!(id in S.rb)) S.rb[id]=v;
-  await persist(); await DB.set("ag",S.ag); await DB.set("rb",S.rb); await DB.set("plIndex",S.plIndex); buildIndex();
+  await persist(); await DB.set("ag",S.ag); await DB.set("ac",S.ac); await DB.set("rb",S.rb); await DB.set("plIndex",S.plIndex); buildIndex();
   LS.set("libStamp",d.at); LS.set("libSent",d.at); LS.set("trackVer",TRACK_VER); LS.set("libAt",Date.now());
   return (d.tracks||[]).length; }
 function syncPayload(){
@@ -1553,7 +1590,7 @@ $("#autoInfo").checked=LS.get("autoInfo",true); $("#autoInfo").onchange=e=>{ LS.
 (async()=>{
   await DB.open();
   S.tracks=await DB.get("tracks")||{}; S.playlists=await DB.get("playlists")||[]; S.saved=await DB.get("saved")||[];
-  S.meta=await DB.get("meta")||{}; S.dz=await DB.get("dz")||{}; S.dg=await DB.get("dg")||{}; S.rb=await DB.get("rb")||{}; S.ex=await DB.get("ex")||{}; S.tags=await DB.get("tags")||{}; S.ag=await DB.get("ag")||{}; S.plIndex=await DB.get("plIndex")||[];
+  S.meta=await DB.get("meta")||{}; S.dz=await DB.get("dz")||{}; S.dg=await DB.get("dg")||{}; S.rb=await DB.get("rb")||{}; S.ex=await DB.get("ex")||{}; S.tags=await DB.get("tags")||{}; S.ag=await DB.get("ag")||{}; S.ac=await DB.get("ac")||{}; S.plIndex=await DB.get("plIndex")||[];
   for(const v of Object.values(S.ex)) v.running=false;
   S.hist=LS.get("hist",[]); S.now=LS.get("now",null);
   buildIndex(); renderTagFilter();
@@ -1574,6 +1611,7 @@ $("#autoInfo").checked=LS.get("autoInfo",true); $("#autoInfo").onchange=e=>{ LS.
   if(authed) await autoRefreshLib(true);
   if(LS.get("autoRb",true) && !S.scanning) rbFill().then(g=>{ if(g) autoSync(); });
   if(authed && !S.scanning) agFill().then(()=>naCheck());
+  if(!S.scanning) setTimeout(acFill,5e3);
   setTimeout(checkUpdate,20e3);
   setInterval(async()=>{ if(document.visibilityState!=="visible") return; await checkUpdate(); autoRefreshLib(); },10*60e3);
   document.addEventListener("visibilitychange",async()=>{
