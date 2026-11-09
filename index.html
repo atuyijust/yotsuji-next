@@ -75,7 +75,7 @@
   @media (max-width:760px){ #toTop{right:calc(14px + env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom))} }
   .cand .sub{font:11px var(--mono);color:var(--dim);margin-top:1px}
   .cand .sub .yr.g{color:var(--accent);font-weight:600} .cand .sub .yr.y{color:var(--accent2)}
-  .cand .cc{white-space:nowrap} #deck .a .cc{color:var(--dim);font-size:.9em;white-space:nowrap}
+  .cand .cc{white-space:nowrap} .cand .cc.g{color:var(--accent);font-weight:600} #deck .a .cc{color:var(--dim);font-size:.9em;white-space:nowrap}
   .cand .sub .gen{color:var(--accent2)} .cand .sub .af{cursor:help}
   .gp{display:inline-block;font:600 11px/1.5 system-ui,sans-serif;padding:0 7px;border-radius:9px;margin-left:5px;vertical-align:2px;white-space:nowrap;
     color:hsl(var(--h) 70% 72%);background:hsl(var(--h) 45% 20% / .55);border:1px solid hsl(var(--h) 45% 38%)}
@@ -244,6 +244,7 @@
     <div class="sl"><span>キー</span><input type="range" min="0" max="5" step="0.5" id="wKey" value="1.5"><span></span></div>
     <div class="sl"><span>ジャンル</span><input type="range" min="0" max="5" step="0.5" id="wGen" value="1"><span></span></div>
     <div class="sl" title="リリース年が近い曲を加点（同じ年〜±2年が満点、10年以上離れると加点なし）"><span>年代</span><input type="range" min="0" max="5" step="0.5" id="wYear" value="1"><span></span></div>
+    <div class="sl" title="今の曲とアーティストの国が同じ曲を加点（国はMusicBrainz。分からない曲は加点なし）"><span>国</span><input type="range" min="0" max="5" step="0.5" id="wCc" value="1"><span></span></div>
     </details>
 
     <details class="side" id="dTagList"><summary><h2>タグの曲</h2> <span class="muted" id="tagListN"></span></summary>
@@ -701,13 +702,13 @@ function suggest(){
   const lm=labelMap(), vctx={curAf, st:(M.af||M.snd)?afStats():{}, lm, curG:genreSet(cur,lm)};
   const fB=+$("#fBpm").value, fK=$("#fKey").checked, fA=$("#fArtist").checked, half=$("#fHalf").checked;
   const [pMin,pMax]=popRange(), fPop=pMin>0||pMax<100;  // POPの範囲（人気度が分からない曲は絞り込み中は出さない）
-  const W={flow:w("wFlow")*M.flow,co:w("wCo")*M.co,bpm:w("wBpm")*M.bpm,key:w("wKey")*M.key,gen:w("wGen")*M.gen,year:w("wYear")*(M.year??1),af:M.af,nov:M.nov,rnd:M.rnd,pop:M.pop,eng:M.eng,cross:M.cross||0,snd:M.snd||0};
+  const W={flow:w("wFlow")*M.flow,co:w("wCo")*M.co,bpm:w("wBpm")*M.bpm,key:w("wKey")*M.key,gen:w("wGen")*M.gen,year:w("wYear")*(M.year??1),cc:w("wCc")*(M.cc??1),af:M.af,nov:M.nov,rnd:M.rnd,pop:M.pop,eng:M.eng,cross:M.cross||0,snd:M.snd||0};
   const seed=cur+":"+(S.seed||0);
   // 点数の表示用: 全部の条件が満点のときの合計（1位を100にすると、BPMとキーが合うだけの曲も100に見えてしまうため）
   const fCc=LS.get("fCc",""), curCc=countriesOf(cur);
   const curTags=tagsOf(cur), fTag=LS.get("fTag",""), TAG_W=1.5;  // 今の曲と同じタグ1つにつき +1.5（2つまで）
   const curYear=yearOf(cur);
-  const ideal=Math.max(1, [W.flow,W.co,W.bpm,W.key,W.gen,W.year].reduce((x,v)=>x+Math.max(0,v),0)+(W.af>0?W.af*1.2:0)+W.nov+W.rnd+W.pop*.6+W.eng+W.cross+W.snd*1.2+(curTags.length?TAG_W*Math.min(2,curTags.length):0));
+  const ideal=Math.max(1, [W.flow,W.co,W.bpm,W.key,W.gen,W.year,curCc.length?W.cc:0].reduce((x,v)=>x+Math.max(0,v),0)+(W.af>0?W.af*1.2:0)+W.nov+W.rnd+W.pop*.6+W.eng+W.cross+W.snd*1.2+(curTags.length?TAG_W*Math.min(2,curTags.length):0));
   const pool = new Set([...Object.keys(S.occ), ...S.saved]);
   const res=[], weak=[];
   for(const id of pool){
@@ -751,8 +752,10 @@ function suggest(){
     if(W.year && curYear){ const y=yearOf(id); if(y){ const d=Math.abs(y-curYear), v=d<=2?1:d<=5?.6:d<=10?.25:0; if(v){ sc+=W.year*v; yv=[v>=1?"g":"y", d===0?"今の曲と同じ年":`今の曲と${d}年差`]; } } }
     if(sameArt){ sc+=0.3; chips.push(["y","同アーティスト"]); }
     if(tg.length){ const sh=tg.filter(x=>curTags.includes(x)); sc+=TAG_W*Math.min(2,sh.length); for(const x of tg) chips.push(["tag"+(sh.includes(x)?" g":""),"#"+x]); }
-    if(sc<=0){ weak.push({id,sc,chips,gst,yv}); continue; }
-    res.push({id,sc,chips,gst,yv});
+    // 国: 今の曲とアーティストの国が1つでも同じなら加点（候補のアーティスト名の横の国を緑に）
+    let ccv=false; if(W.cc && curCc.length && countriesOf(id).some(c=>curCc.includes(c))){ sc+=W.cc; ccv=true; }
+    if(sc<=0){ weak.push({id,sc,chips,gst,yv,ccv}); continue; }
+    res.push({id,sc,chips,gst,yv,ccv});
   }
   for(const r of [...res,...weak]) r.pct=Math.max(0,Math.min(100,Math.round(r.sc/ideal*100)));
   res.sort((a,b)=>b.sc-a.sc);
@@ -835,7 +838,7 @@ function renderCands(keepSel){
   const max=top[0].sc, lm=labelMap();
   const rows = top.map((c,i)=>{ const t=S.tracks[c.id]; const m=S.meta[c.id]||{};
     return `<div class="cand${i===sel?" sel":""}" data-i="${i}" data-id="${c.id}"><span class="sc" title="全部の条件が揃ったときを100とした点">${list.weak?"—":c.pct}</span><img src="${esc(t.img)}" alt="" loading="lazy">
-      <div><div class="nm">${esc(t.name)}${(()=>{ const gl=genreList(c.id,lm); return (gl.length?gl.slice(0,3).map(x=>genrePill(x)).join(""):`<span class="gp none" title="ジャンル不明">？</span>`)+(c.gst?`<span class="gj ${c.gst[0]}"${c.gst[2]?` title="${esc(c.gst[2])}"`:""}>${c.gst[1]}</span>`:""); })()}</div><div class="muted">${esc(arts(t))}${ccSpan(c.id)}</div>${subLine(c.id,lm,c.yv)}<div class="chips">${c.chips.map(([k,x])=>`<span class="chip ${k}">${esc(x)}</span>`).join("")}</div></div>
+      <div><div class="nm">${esc(t.name)}${(()=>{ const gl=genreList(c.id,lm); return (gl.length?gl.slice(0,3).map(x=>genrePill(x)).join(""):`<span class="gp none" title="ジャンル不明">？</span>`)+(c.gst?`<span class="gj ${c.gst[0]}"${c.gst[2]?` title="${esc(c.gst[2])}"`:""}>${c.gst[1]}</span>`:""); })()}</div><div class="muted">${esc(arts(t))}${ccSpan(c.id,c.ccv)}</div>${subLine(c.id,lm,c.yv)}<div class="chips">${c.chips.map(([k,x])=>`<span class="chip ${k}">${esc(x)}</span>`).join("")}</div></div>
       <span class="meta">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="meta" style="color:var(--accent2)">${m.key||"—"}</span>
       <span class="acts"><button class="sm" data-tagbtn="${c.id}" title="この曲にタグを付ける">＃</button><button class="sm" data-c="${c.id}" title="曲名をコピー（rekordboxの検索に貼り付け）">⎘</button><button class="sm" data-q="${c.id}">キュー</button><button class="sm" data-p="${c.id}">再生</button><button class="sm" data-n="${c.id}">Nowへ</button></span></div>`; }).join("");
   let html=(list.weak?`<div class="empty" style="padding:8px 0">今の曲の手がかり（BPM・キー・プレイリスト・音の特徴）が少ないので、参考として並べています。BPM／キーを入れるか、この曲を含むプレイリストを読み込むと精度が上がります。</div>`:"")+rows;
@@ -1086,7 +1089,7 @@ const ccDn=(()=>{ try{ return new Intl.DisplayNames(["ja"],{type:"region"}); }ca
 function ccName(c){ if(!c) return ""; if(CC_SHORT[c]) return CC_SHORT[c]; if(c==="XW") return "世界"; if(c==="XE") return "ヨーロッパ"; try{ return ccDn?.of(c)||c; }catch{ return c; } }
 const ccFlag=c=>/^[A-Z]{2}$/.test(c||"") && !/^X/.test(c) ? String.fromCodePoint(...[...c].map(x=>0x1F1E6+x.charCodeAt(0)-65)) : "";
 const ccText=c=>c?`${ccFlag(c)}${ccFlag(c)?" ":""}${ccName(c)}`:"";
-const ccSpan=id=>{ const cc=countriesOf(id); return cc.length?` <span class="cc" title="アーティストの国（MusicBrainz）">${cc.slice(0,3).map(c=>esc(ccText(c))).join(" / ")}</span>`:""; };
+const ccSpan=(id,hit)=>{ const cc=countriesOf(id); return cc.length?` <span class="cc${hit?" g":""}" title="アーティストの国（MusicBrainz）${hit?"。今の曲と同じ国（加点）":""}">${cc.slice(0,3).map(c=>esc(ccText(c))).join(" / ")}</span>`:""; };
 // 国の絞り込み: "" すべて / "=" 今の曲と同じ国 / "!JP" 日本以外 / "JP" 等その国。国が分からない曲は絞り込み中は出さない
 function ccMatch(id,f,curCc){ if(!f) return true; const cc=countriesOf(id); if(!cc.length) return false;
   if(f==="=") return curCc.length>0 && cc.some(c=>curCc.includes(c)); if(f[0]==="!") return !cc.includes(f.slice(1)); return cc.includes(f); }
@@ -1393,7 +1396,7 @@ function syncPayload(){
   const meta={}; for(const [id,m] of Object.entries(S.meta)){ if(m.bpm||m.key||m.genre||m.rbBad) meta[id]={bpm:m.bpm||0,key:m.key||"",genre:m.genre||"",src:m.src||"",...(m.rbBad?{rbBad:1}:{})}; }
   const dg={}; for(const [id,v] of Object.entries(S.dg)) if(v) dg[id]=v;
   return {v:1, at:Date.now(), meta, dg, dz:S.dz, plSel:LS.get("plSel",[]), incSaved:LS.get("incSaved",false), dj:LS.get("dj",false), copyMode:LS.get("copyMode","title"),
-    weights:Object.fromEntries(["wFlow","wCo","wBpm","wKey","wGen","wYear"].map(k=>[k,LS.get(k,null)])), hist:S.hist, now:S.now, tags:S.tags, libAt:LS.get("libSent",0), cid:LS.get("cid","")}; }
+    weights:Object.fromEntries(["wFlow","wCo","wBpm","wKey","wGen","wYear","wCc"].map(k=>[k,LS.get(k,null)])), hist:S.hist, now:S.now, tags:S.tags, libAt:LS.get("libSent",0), cid:LS.get("cid","")}; }
 const SRC_RANK={manual:4,rekordbox:3,exportify:2,reccobeats:2,deezer:1,discogs:1,"":0};
 const SRC_LABEL={deezer:"Deezer",rekordbox:"rekordbox",exportify:"Exportify",reccobeats:"ReccoBeats",manual:"手入力",discogs:"Discogs"};
 function mergeMeta(remote){
@@ -1613,7 +1616,7 @@ $("#q").oninput=doSearch;
 $("#follow").onchange=e=>setFollow(e.target.checked);
 $("#btnExport").onclick=exportSet;
 $("#btnClearHist").onclick=()=>{ S.hist=[]; LS.set("hist",[]); refresh(); };
-["wFlow","wCo","wBpm","wKey","wGen","wYear"].forEach(id=>{ const el=$("#"+id); const sp=el.nextElementSibling; el.value=LS.get(id,el.value); sp.textContent=el.value;
+["wFlow","wCo","wBpm","wKey","wGen","wYear","wCc"].forEach(id=>{ const el=$("#"+id); const sp=el.nextElementSibling; el.value=LS.get(id,el.value); sp.textContent=el.value;
   el.oninput=()=>{ sp.textContent=el.value; LS.set(id,el.value); renderCands(); }; });
 ["fBpm","fKey","fArtist","fHalf"].forEach(id=>$("#"+id).onchange=renderCands);
 // POPの範囲スライダー（つまみ2つ。下限が上限を越えないように押し戻す）。動かしている間は表示だけ、離したら候補を出し直す
