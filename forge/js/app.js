@@ -472,6 +472,10 @@ function renderTracks() {
         '「探す範囲」を広くする、似せたいアーティストやジャンルを増やす、条件をゆるめる、でも増やせます。',
     );
   }
+  if (s.requested && t.length < s.requested && s.drops) {
+    const top = Object.entries(s.drops).sort((a, b) => b[1] - a[1]).slice(0, 4);
+    if (top.length) notes.push(`外れた理由：${top.map(([k, n]) => `${k} ${n} 曲`).join('、')}。いちばん多い条件をゆるめると増えます。`);
+  }
   if (s.nearUsed) notes.push(`条件どおりの曲だけでは足りなかったため、サウンドの範囲からわずかに外れた曲を ${s.nearUsed} 曲入れています（一覧の後ろの方）。`);
   if (s.relaxedCap) notes.push(`足りない分を補うため、${s.relaxedCap} 組のアーティストは上限より 1 曲多く入れています。`);
   if (s.noLastfm) notes.push('Last.fm の API キーが未設定のため、似ている曲の精度が低くなっています。「設定」でキーを入れてください。');

@@ -2,7 +2,7 @@
 import * as sp from './spotify.js';
 import * as src from './sources.js';
 import { FEATURES, themeTags } from './data.js';
-import { suggestThemeTracks } from './nl.js';
+import { suggestThemeTracks, getClaudeKey } from './nl.js';
 import { norm, baseTitle, shuffle, pLimit } from './util.js';
 
 const FEAT_DEF = Object.fromEntries(FEATURES.map((f) => [f.key, f]));
@@ -70,7 +70,8 @@ export async function generate(c, onProgress = () => {}) {
     return kwWords.every((w) => hay.includes(w));
   };
 
-  const add = (t, source, weight = 0) => {
+  // themeHit: テーマの別々の根拠（タグ・Claude）で何回見つかったか
+  const add = (t, source, weight = 0, themeHit = 0) => {
     if (!t?.id) return;
     let e = pool.get(t.id);
     if (!e) {
@@ -80,6 +81,7 @@ export async function generate(c, onProgress = () => {}) {
       Object.assign(e, t, { sources: e.sources, partial: false });
     }
     e.sources.set(source, Math.max(e.sources.get(source) || 0, weight));
+    if (themeHit) e.themeHits = (e.themeHits || 0) + themeHit;
   };
 
   const searchPages = async (query, n, filterFn) => {
@@ -391,7 +393,7 @@ export async function generate(c, onProgress = () => {}) {
         await Promise.all(
           pick.map(async (t) => {
             const tr = await sp.resolveTrack(t.artist, t.name, yf).catch(() => null);
-            if (tr) add(tr, source, weight * (1 - Math.min(0.5, t.rank / 2000)));
+            if (tr) add(tr, source, weight * (1 - Math.min(0.5, t.rank / 1000)), source === 'theme' ? 1 : 0);
           }),
         );
         if (!buffer.length && page >= Math.min(totalPages, 20)) ex.done = true;
@@ -403,29 +405,56 @@ export async function generate(c, onProgress = () => {}) {
 
   // テーマ：Last.fm でそのテーマのタグが付いた曲（聴いた人が「ハロウィンの曲」と認めている曲）＋ Claude が挙げた定番曲
   if (themeMode) {
-    if (useLastfm) tTags.forEach((tag, i) => expanders.push(tagExpander(tag, i === 0 ? 0.4 : 0.3, 'theme')));
-    log(`「${c.theme}」に合う曲を集めています…`, 10);
-    const picks = await suggestThemeTracks({
-      theme: c.theme,
-      genres: c.genres || [],
-      yearFrom: c.yearFrom,
-      yearTo: c.yearTo,
-      countries: c.countries || [],
-      excludeCountries: c.excludeCountries || [],
-      n: Math.min(150, Math.max(60, Math.ceil(size * 0.8))),
-    }).catch((e) => {
-      console.warn('[playlist-forge] theme picks', e);
-      return [];
-    });
-    await Promise.all(
-      picks.map(async (t, i) => {
-        if (excludeArtistNames.has(norm(t.artist)) || scriptExcluded(`${t.artist} ${t.title}`)) return;
-        const tr = await sp.resolveTrack(t.artist, t.title, yf).catch(() => null);
-        if (tr) add(tr, 'theme', 0.45 - Math.min(0.15, i / 1000));
-      }),
-    );
-    if (!useLastfm && !picks.length) {
+    // 先頭 2 つ（例: halloween, halloween songs）がテーマそのもの。spooky・horror などは雰囲気が近いだけなので弱く
+    if (useLastfm) tTags.forEach((tag, i) => expanders.push(tagExpander(tag, i < 2 ? 0.45 : 0.15, 'theme')));
+    if (!useLastfm && !getClaudeKey()) {
       throw new Error('テーマで探すには、Last.fm の API キーか Claude の API キーが必要です。「設定」で入力してください');
+    }
+    // Claude に定番曲を挙げてもらう。足りなければ「挙げ済み以外で」と何度か頼む（音の条件も伝えて、絞り込みで外れにくくする）
+    if (getClaudeKey()) {
+      const asked = new Set();
+      const soundText = () => {
+        const sound = active.map(([k, [lo, hi]]) => {
+          const f = FEAT_DEF[k];
+          return f.pct ? `${f.label} ${Math.round(lo * 100)}〜${Math.round(hi * 100)}（0〜100）` : `${f.label} ${Math.round(lo)}〜${Math.round(hi)}`;
+        });
+        if (c.mode === 'major') sound.push('長調');
+        if (c.mode === 'minor') sound.push('短調');
+        return sound;
+      };
+      let rounds = 0;
+      const ex = {
+        done: false,
+        async next() {
+          rounds++;
+          log(`「${c.theme}」に合う曲を Claude に挙げてもらっています…（${rounds} 回目）`, null);
+          const picks = await suggestThemeTracks({
+            theme: c.theme,
+            genres: c.genres || [],
+            yearFrom: c.yearFrom,
+            yearTo: c.yearTo,
+            countries: c.countries || [],
+            excludeCountries: c.excludeCountries || [],
+            sound: soundText(),
+            avoid: [...asked],
+            n: Math.min(150, Math.max(60, Math.ceil(size * 0.8))),
+          }).catch((e) => {
+            console.warn('[playlist-forge] theme picks', e);
+            return [];
+          });
+          const fresh = picks.filter((t) => !asked.has(`${t.title} / ${t.artist}`));
+          fresh.forEach((t) => asked.add(`${t.title} / ${t.artist}`));
+          if (fresh.length < 10 || rounds >= 6) ex.done = true;
+          await Promise.all(
+            fresh.map(async (t, i) => {
+              if (excludeArtistNames.has(norm(t.artist)) || scriptExcluded(`${t.artist} ${t.title}`)) return;
+              const tr = await sp.resolveTrack(t.artist, t.title, yf).catch(() => null);
+              if (tr) add(tr, 'theme', 0.5 - Math.min(0.15, (rounds - 1) * 0.03 + i / 1000), 1);
+            }),
+          );
+        },
+      };
+      expanders.push(ex);
     }
   }
 
@@ -506,6 +535,9 @@ export async function generate(c, onProgress = () => {}) {
   const nearMiss = [];
   let totalCandidates = 0;
   let keywordDropped = 0;
+  // どの条件で何曲外れたか（足りないときの説明用）
+  const drops = {};
+  const drop = (why, n = 1) => n > 0 && (drops[why] = (drops[why] || 0) + n);
   let withFeatures = 0;
   let mbBudget = inc.size ? 80 : 0;
 
@@ -557,11 +589,16 @@ export async function generate(c, onProgress = () => {}) {
 
     // サウンド条件。わずかに外れた曲は「惜しい曲」として取っておき、曲数が足りないときの補充に使う
     batch = batch.filter((t) => {
-      if (c.requireFeatures && active.some(([k]) => k !== 'popularity') && !t.features) return false;
-      if (c.mode === 'major' && t.features && t.features.mode !== 1) return false;
-      if (c.mode === 'minor' && t.features && t.features.mode !== 0) return false;
+      if (c.requireFeatures && active.some(([k]) => k !== 'popularity') && !t.features) return drop('特徴量データがない'), false;
+      if (c.mode === 'major' && t.features && t.features.mode !== 1) return drop('調（メジャー）'), false;
+      if (c.mode === 'minor' && t.features && t.features.mode !== 0) return drop('調（マイナー）'), false;
       t.miss = missOf(t);
-      return t.miss <= 1;
+      if (t.miss > 1) {
+        const k = active.find(([k, r]) => !inRange(t, k, r))?.[0];
+        drop(k ? FEAT_DEF[k].label : 'サウンド');
+        return false;
+      }
+      return true;
     });
 
     // ReccoBeats 由来の曲はアルバム情報がないので補完
@@ -585,13 +622,13 @@ export async function generate(c, onProgress = () => {}) {
     batch = batch.filter((t) => {
       const y = t.album?.year;
       const mo = t.album?.month;
-      if (c.yearFrom && (!y || y < c.yearFrom)) return false;
-      if (c.yearTo && (!y || y > c.yearTo)) return false;
-      if (c.yearFrom && c.monthFrom && y === c.yearFrom && (!mo || mo < c.monthFrom)) return false;
-      if (c.yearTo && c.monthTo && y === c.yearTo && (!mo || mo > c.monthTo)) return false;
-      if (c.durationMin && t.durationMs && t.durationMs < c.durationMin * 60000) return false;
-      if (c.durationMax && t.durationMs && t.durationMs > c.durationMax * 60000) return false;
-      if (c.excludeExplicit && t.explicit) return false;
+      if (c.yearFrom && (!y || y < c.yearFrom)) return drop('リリース時期'), false;
+      if (c.yearTo && (!y || y > c.yearTo)) return drop('リリース時期'), false;
+      if (c.yearFrom && c.monthFrom && y === c.yearFrom && (!mo || mo < c.monthFrom)) return drop('リリース時期'), false;
+      if (c.yearTo && c.monthTo && y === c.yearTo && (!mo || mo > c.monthTo)) return drop('リリース時期'), false;
+      if (c.durationMin && t.durationMs && t.durationMs < c.durationMin * 60000) return drop('曲の長さ'), false;
+      if (c.durationMax && t.durationMs && t.durationMs > c.durationMax * 60000) return drop('曲の長さ'), false;
+      if (c.excludeExplicit && t.explicit) return drop('Explicit 除外'), false;
       if (c.seedMode === 'similar' && t.artists.some((a) => seedIds.has(a.id))) return false;
       return true;
     });
@@ -605,8 +642,14 @@ export async function generate(c, onProgress = () => {}) {
         // 含める指定は国が分からないと判定できないので MusicBrainz でも調べる。除外指定は少しだけ
         const codes = await countriesOf(t, inc.size > 0);
         t.countryUnknown = !codes.length;
-        if (inc.size && !codes.some((x) => inc.has(x))) continue;
-        if (exc.size && codes.some((x) => exc.has(x))) continue;
+        if (inc.size && !codes.some((x) => inc.has(x))) {
+          drop('アーティストの国');
+          continue;
+        }
+        if (exc.size && codes.some((x) => exc.has(x))) {
+          drop('アーティストの国');
+          continue;
+        }
         out.push(t);
       }
       batch = out;
@@ -712,11 +755,14 @@ export async function generate(c, onProgress = () => {}) {
   for (const t of cands) {
     const srcBonus = Math.max(0, ...t.sources.values()) + 0.05 * (t.sources.size - 1);
     // 人気度（メジャーさ）。似たアーティスト探しでは控えめ、ジャンル・年代指定では強め
-    const popWeight = activeKeys.has('popularity') ? 0.1 : hasSimilarSeeds ? 0.2 : 0.45;
+    // テーマでは「その時期に聴かれているか」を優先し、人気度は控えめに
+    const popWeight = activeKeys.has('popularity') ? 0.1 : themeMode ? 0.15 : hasSimilarSeeds ? 0.2 : 0.45;
+    const themeBonus = themeMode ? Math.min(0.3, 0.1 * ((t.themeHits || 1) - 1)) : 0;
     const popBonus = t.popularity != null ? (t.popularity / 100) * popWeight : 0;
     // 国を除外する指定で国が分からなかった曲は、分かっている曲より後ろに
     const unknownPenalty = exc.size && t.countryUnknown ? 0.12 : 0;
-    t.score = closeness(t) * 0.6 + srcBonus + profileSim(t) * 0.35 + popBonus + Math.random() * 0.04 - unknownPenalty - (t.miss > 0 ? 10 + t.miss : 0);
+    // テーマでは BPM などは「絞り込み」として効けば十分なので、範囲の中央に近いかどうかはあまり重視しない
+    t.score = closeness(t) * (themeMode ? 0.15 : 0.6) + srcBonus + profileSim(t) * 0.35 + popBonus + themeBonus + Math.random() * 0.04 - unknownPenalty - (t.miss > 0 ? 10 + t.miss : 0);
   }
   cands.sort((a, b) => b.score - a.score);
 
@@ -790,6 +836,7 @@ export async function generate(c, onProgress = () => {}) {
     stats: {
       candidates: totalCandidates,
       keywordDropped,
+      drops,
       keywords: c.keywords || '',
       withFeatures,
       matched: cands.filter((t) => !(t.miss > 0)).length,

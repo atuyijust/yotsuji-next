@@ -60,12 +60,12 @@ export const ORDERS = [
   ['popularity', '人気順'],
 ];
 
-// テーマ（季節・行事・場面）→ Last.fm のタグ。曲名に含む語ではなく「連想される曲」を集めるのに使う
+// テーマ（季節・行事・場面）→ Last.fm のタグ。先頭 2 つがテーマそのもの、3 つ目以降は雰囲気が近いだけのタグ（弱く扱う）。曲名に含む語ではなく「連想される曲」を集めるのに使う
 export const THEMES = [
-  { key: 'halloween', label: 'ハロウィン', words: /ハロウィン|ハロウィーン|halloween/i, tags: ['halloween', 'spooky', 'horror', 'creepy', 'halloween songs'] },
-  { key: 'christmas', label: 'クリスマス', words: /クリスマス|x'?mas|christmas/i, tags: ['christmas', 'christmas songs', 'xmas', 'holiday', 'christmas music'] },
+  { key: 'halloween', label: 'ハロウィン', words: /ハロウィン|ハロウィーン|halloween/i, tags: ['halloween', 'halloween songs', 'spooky', 'horror', 'creepy'] },
+  { key: 'christmas', label: 'クリスマス', words: /クリスマス|x'?mas|christmas/i, tags: ['christmas', 'christmas songs', 'xmas', 'christmas music', 'holiday'] },
   { key: 'valentine', label: 'バレンタイン', words: /バレンタイン|valentine/i, tags: ['valentine', 'love songs', 'love', 'romantic'] },
-  { key: 'summer', label: '夏', words: /夏|サマー|summer/i, tags: ['summer', 'summer vibes', 'beach', 'summer songs'] },
+  { key: 'summer', label: '夏', words: /夏|サマー|summer/i, tags: ['summer', 'summer songs', 'summer vibes', 'beach'] },
   { key: 'winter', label: '冬', words: /冬|ウィンター|winter/i, tags: ['winter', 'snow', 'cold'] },
   { key: 'spring', label: '春', words: /春|桜|spring/i, tags: ['spring', 'sakura'] },
   { key: 'autumn', label: '秋', words: /秋|autumn|fall/i, tags: ['autumn', 'fall'] },

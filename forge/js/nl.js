@@ -119,7 +119,7 @@ const THEME_SCHEMA = {
   },
 };
 
-export async function suggestThemeTracks({ theme, genres = [], yearFrom, yearTo, countries = [], excludeCountries = [], n = 80 }) {
+export async function suggestThemeTracks({ theme, genres = [], yearFrom, yearTo, countries = [], excludeCountries = [], sound = [], avoid = [], n = 80 }) {
   const apiKey = getClaudeKey();
   if (!apiKey) return [];
   sdkPromise ??= import(SDK_URL);
@@ -130,7 +130,9 @@ export async function suggestThemeTracks({ theme, genres = [], yearFrom, yearTo,
     yearFrom || yearTo ? `リリース年: ${yearFrom || ''}〜${yearTo || ''}` : '',
     countries.length ? `アーティストの国: ${countries.join(', ')}` : '',
     excludeCountries.length ? `除外する国: ${excludeCountries.join(', ')}` : '',
+    sound.length ? `音の条件（できるだけ満たす曲を）: ${sound.join('、')}` : '',
   ].filter(Boolean);
+  const avoidText = avoid.length ? `\n次の曲はもう挙げてもらったので、これ以外で:\n${avoid.slice(-250).join('\n')}` : '';
   const res = await client.beta.messages.create({
     model: MODEL,
     max_tokens: 8000,
@@ -140,7 +142,7 @@ export async function suggestThemeTracks({ theme, genres = [], yearFrom, yearTo,
     system:
       'あなたは音楽に詳しい選曲家です。指定されたテーマ（季節・行事・場面）の時期によく流れる曲や、そのテーマを強く連想させる曲を挙げてください。' +
       '曲名にテーマの単語が入っているかどうかは問いません。実在する曲だけを、Spotify で検索できる正式な曲名とアーティスト名で書いてください。定番を優先し、同じアーティストは 2 曲までにしてください。',
-    messages: [{ role: 'user', content: `テーマ: ${theme}\n${cond.join('\n')}\n${n} 曲挙げてください。` }],
+    messages: [{ role: 'user', content: `テーマ: ${theme}\n${cond.join('\n')}\n${n} 曲挙げてください。${avoidText}` }],
   });
   const block = res.content.find((b) => b.type === 'text');
   if (!block) return [];
