@@ -247,9 +247,23 @@ async function resolveSeedNames() {
       if (!state.seedTracks.some((s) => s.id === found.id)) state.seedTracks.push(seedTrackOf(found));
       $('#keywords').value = '';
       toast(`キーワードを「似せたい曲：${found.name} – ${found.artists[0]?.name}」に置き換えました`);
+    } else if (looksLikeGenre(kw)) {
+      // 「hardcore punk」のようなジャンル名は、曲名の絞り込みではなくジャンルとして使う
+      const g = kw.toLowerCase();
+      if (!state.genres.includes(g)) state.genres.push(g);
+      $('#keywords').value = '';
+      toast(`キーワード「${kw}」をジャンルに移しました`);
     }
   }
   renderAllChips();
+}
+
+// ジャンル名らしい語か（既知のジャンル名、または punk・rock などジャンルの語を含む）
+const GENRE_ROOTS = /\b(punk|rock|pop|metal|core|hardcore|emo|ska|jazz|soul|funk|disco|house|techno|trance|dub|dubstep|garage|grime|drill|trap|rap|hip ?hop|r&b|blues|folk|country|indie|wave|gaze|shoegaze|ambient|electro|electronica|edm|breaks|breakbeat|jungle|drum and bass|dnb|reggae|reggaeton|latin|bossa|samba|afro\w*|gospel|grunge|psych\w*|prog|lo-?fi|city pop|j-?pop|j-?rock|k-?pop|anime|vocaloid|enka|classical|soundtrack|bebop|industrial|goth\w*|post-\w+|screamo|thrash|doom|sludge|stoner|black metal|death metal|grind\w*|rockabilly)\b/i;
+function looksLikeGenre(text) {
+  const t = text.trim().toLowerCase();
+  if (!t || t.split(/\s+/).length > 4) return false;
+  return GENRES.includes(t) || GENRE_ROOTS.test(t);
 }
 
 // 文字列から曲を特定する。曲名とアーティスト名の両方が文字列に含まれる曲だけを採用
@@ -402,7 +416,9 @@ async function runGenerate() {
     delete $('#pl-name').dataset.suggested;
     if (!tracks.length) {
       throw new Error(
-        `条件に合う曲が見つかりませんでした（候補 ${stats.candidates} 曲 → 該当 0 曲）。\nサウンドの範囲を広げる、年代や国の条件をゆるめる、「探す範囲」を広くする、などをお試しください。`,
+        stats.keywordDropped && stats.keywordDropped >= stats.candidates * 0.9
+          ? `条件に合う曲が見つかりませんでした（候補 ${stats.candidates} 曲のうち ${stats.keywordDropped} 曲が、キーワード「${stats.keywords}」を曲名・アルバム名・アーティスト名に含まないため外れました）。\nキーワードは曲名などの絞り込みです。ジャンルとして使いたい場合は「ジャンル」に入れてください。`
+          : `条件に合う曲が見つかりませんでした（候補 ${stats.candidates} 曲 → 該当 0 曲）。\nサウンドの範囲を広げる、年代や国の条件をゆるめる、「探す範囲」を広くする、などをお試しください。`,
       );
     }
     renderTracks();

@@ -470,6 +470,7 @@ export async function generate(c, onProgress = () => {}) {
   const accepted = [];
   const nearMiss = [];
   let totalCandidates = 0;
+  let keywordDropped = 0;
   let withFeatures = 0;
   let mbBudget = inc.size ? 80 : 0;
 
@@ -497,10 +498,12 @@ export async function generate(c, onProgress = () => {}) {
       if (c.seedMode === 'similar' && t.artists.some((a) => seedIds.has(a.id) || seedNames.has(norm(a.name)))) return false;
       if (t.artists.some((a) => excludeArtistNames.has(norm(a.name)))) return false;
       if (seedTrackSet.has(t.id) || seedTrackKeys.has(`${norm(t.artists[0]?.name)}|${baseTitle(t.name)}`)) return false;
-      if (!hasKeywords(t)) return false;
       return true;
     });
     totalCandidates += batch.length;
+    const beforeKw = batch.length;
+    batch = batch.filter(hasKeywords);
+    keywordDropped += beforeKw - batch.length;
     if (!batch.length) return;
 
     log(`${batch.length} 曲の特徴量（BPM など）を取得しています…`, pct);
@@ -747,6 +750,8 @@ export async function generate(c, onProgress = () => {}) {
     tracks: orderTracks(picked, c.order),
     stats: {
       candidates: totalCandidates,
+      keywordDropped,
+      keywords: c.keywords || '',
       withFeatures,
       matched: cands.filter((t) => !(t.miss > 0)).length,
       nearUsed,
