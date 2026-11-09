@@ -514,8 +514,7 @@ function renderTracks() {
         <div class="acts">
           <button class="btn-sm act-copy" title="曲名とアーティスト名をコピー">⎘</button>
           <button class="btn-sm act-queue" title="Spotify のキューに追加">キュー</button>
-          <button class="btn-sm act-play" title="Spotify アプリで再生">再生</button>
-          <button class="icon-btn play" title="このページで試聴">▶</button>
+          <button class="btn-sm act-play" title="Spotify で再生（開いている PC／スマホの Spotify で鳴らします）">再生</button>
           <button class="icon-btn up" title="上へ">↑</button>
           <button class="icon-btn rm" title="外す">×</button>
         </div>
@@ -524,7 +523,6 @@ function renderTracks() {
     .join('');
   list.querySelectorAll('.track').forEach((li) => {
     const i = Number(li.dataset.i);
-    li.querySelector('.play').addEventListener('click', () => play(state.tracks[i].id));
     li.querySelector('.act-play').addEventListener('click', () => playInApp(state.tracks[i]));
     li.querySelector('.act-queue').addEventListener('click', () => queueInApp(state.tracks[i]));
     li.querySelector('.act-copy').addEventListener('click', () => copyTitle(state.tracks[i]));
@@ -551,8 +549,41 @@ function camelot(key, mode) {
 }
 
 // Spotify アプリで再生（動いているデバイスがなければ開いている Spotify を探す）
+// 再生の権限がない古いログインなら、一覧を一時保存してログインし直す（戻ったら一覧を復元）
+function reloginForPlayback() {
+  toast('再生の権限を付けるため、Spotify にログインし直します…');
+  try {
+    sessionStorage.setItem(
+      'spm.pendingResult',
+      JSON.stringify({
+        tracks: state.tracks.map((t) => ({ ...t, sources: [...(t.sources || new Map()).entries()] })),
+        stats: state.stats,
+        name: $('#pl-name').value,
+        desc: $('#pl-desc').value,
+      }),
+    );
+  } catch {}
+  store.set('spm.lastCriteria', collectCriteria());
+  setTimeout(() => sp.login().catch((e) => showError(e)), 600);
+}
+
+function restorePendingResult() {
+  let d = null;
+  try {
+    d = JSON.parse(sessionStorage.getItem('spm.pendingResult') || 'null');
+    sessionStorage.removeItem('spm.pendingResult');
+  } catch {}
+  if (!d?.tracks?.length) return;
+  state.tracks = d.tracks.map((t) => ({ ...t, sources: new Map(t.sources) }));
+  state.stats = d.stats;
+  $('#pl-name').value = d.name || '';
+  $('#pl-desc').value = d.desc || '';
+  renderTracks();
+  toast('ログインし直しました。もう一度「再生」を押してください');
+}
+
 async function playInApp(t) {
-  if (!sp.canControlPlayback()) return toast('再生の権限を追加しました。いったんログアウトして、もう一度ログインしてください');
+  if (!sp.canControlPlayback()) return reloginForPlayback();
   toast('Spotify に再生を指示中…');
   try {
     const r = await sp.playTrack(t, toast);
@@ -563,7 +594,7 @@ async function playInApp(t) {
 }
 
 async function queueInApp(t) {
-  if (!sp.canControlPlayback()) return toast('再生の権限を追加しました。いったんログアウトして、もう一度ログインしてください');
+  if (!sp.canControlPlayback()) return reloginForPlayback();
   toast('Spotify のキューに追加中…');
   try {
     await sp.queueTrack(t);
@@ -583,10 +614,7 @@ async function copyTitle(t) {
   }
 }
 
-function play(id) {
-  $('#player-frame').src = `https://open.spotify.com/embed/track/${id}?utm_source=generator&theme=0`;
-  $('#player').hidden = false;
-}
+
 
 async function savePlaylist() {
   if (!state.tracks.length) return;
@@ -806,10 +834,6 @@ function init() {
     e.target.value = '';
     renderTracks();
   });
-  $('#player-close').addEventListener('click', () => {
-    $('#player').hidden = true;
-    $('#player-frame').src = 'about:blank';
-  });
 
   // プリセット
   renderPresets();
@@ -863,7 +887,10 @@ function init() {
 
   sp.handleCallback()
     .then((done) => {
-      if (done) toast('Spotify にログインしました');
+      if (done) {
+        toast('Spotify にログインしました');
+        restorePendingResult();
+      }
     })
     .catch((e) => showError(e))
     .finally(async () => {
