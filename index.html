@@ -56,6 +56,11 @@
   .hist{font-size:12px}
   .hist div{padding:3px 0;border-bottom:1px dashed var(--line);display:flex;gap:6px}
   .hist .n{color:var(--dim);font-family:var(--mono);width:22px}
+  #tagListBox .tlh{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-bottom:6px} #tagListBox .tlh .chip{cursor:pointer} #tagListBox .tlh .chip.on{background:#3d3560;color:#fff}
+  #tagListBox .tlh select{margin-left:auto;font-size:11px}
+  #tagListBox .tl{font-size:12px;padding:4px 2px;border-bottom:1px dashed var(--line);display:flex;gap:6px;align-items:baseline;cursor:pointer} #tagListBox .tl:hover{background:var(--chip)}
+  #tagListBox .tl.cur{color:var(--accent)} #tagListBox .tl .nm{flex:1;min-width:0} #tagListBox .tl .m{font:11px var(--mono);color:var(--dim);white-space:nowrap}
+  #tagListBox .tl .tg{display:block;font-size:10px;color:#c9b8ff}
   .sl{display:grid;grid-template-columns:110px 1fr 28px;gap:6px;align-items:center;margin:4px 0}
   .sl span:last-child{font-family:var(--mono);color:var(--dim);text-align:right}
   .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
@@ -214,6 +219,10 @@
     <div class="sl"><span>キー</span><input type="range" min="0" max="5" step="0.5" id="wKey" value="1.5"><span></span></div>
     <div class="sl"><span>ジャンル</span><input type="range" min="0" max="5" step="0.5" id="wGen" value="1"><span></span></div>
     <div class="sl" title="リリース年が近い曲を加点（同じ年〜±2年が満点、10年以上離れると加点なし）"><span>年代</span><input type="range" min="0" max="5" step="0.5" id="wYear" value="1"><span></span></div>
+    </details>
+
+    <details class="side" id="dTagList"><summary><h2>タグの曲</h2> <span class="muted" id="tagListN"></span></summary>
+    <div id="tagListBox"></div>
     </details>
 
     <details class="side" id="dHist" open><summary><h2>セット履歴</h2></summary>
@@ -821,6 +830,19 @@ const PRESET_ALL=TAG_PRESET.flatMap(([,l])=>l);
 const cleanTag=x=>String(x||"").replace(/^#/,"").replace(/\s+/g," ").trim().slice(0,24);
 function allTags(){ const n={}; for(const v of Object.values(S.tags)) for(const t of v.t||[]) n[t]=(n[t]||0)+1; return Object.entries(n).sort((a,b)=>b[1]-a[1]).map(x=>x[0]); }
 function setTags(id,list){ const t=[...new Set(list.map(cleanTag).filter(Boolean))]; S.tags[id]={t,at:Date.now()}; DB.set("tags",S.tags); renderTagFilter(); refresh(); renderDeck(true); if(tagPopId===id) renderTagPop(); autoSync(); }
+// タグを付けた曲の一覧（左ペイン「タグの曲」）。タグを選ぶとその曲だけ、「すべて」はタグ付きの曲全部。曲を押すとNowへ
+function renderTagList(){ const box=$("#tagListBox"); if(!box) return; if(later(renderTagList)) return;
+  const all=allTags(), cur=LS.get("tagListTag",""), sort=LS.get("tagListSort","new"), sel=all.includes(cur)?cur:"";
+  const n={}; for(const v of Object.values(S.tags)) for(const t of v.t||[]) n[t]=(n[t]||0)+1;
+  let ids=Object.keys(S.tags).filter(id=>S.tracks[id] && tagsOf(id).length && (!sel || tagsOf(id).includes(sel)));
+  const bpm=id=>S.meta[id]?.bpm||999;
+  ids.sort(sort==="bpm"?(a,b)=>bpm(a)-bpm(b):sort==="name"?(a,b)=>S.tracks[a].name.localeCompare(S.tracks[b].name,"ja"):(a,b)=>(S.tags[b].at||0)-(S.tags[a].at||0));
+  $("#tagListN").textContent=all.length?`${Object.keys(S.tags).filter(id=>S.tracks[id]&&tagsOf(id).length).length}曲`:"";
+  if(!all.length){ box.innerHTML=`<div class="muted">まだタグを付けた曲がありません（デッキの「＋タグ」か候補の「＃」で付けられます）</div>`; return; }
+  box.innerHTML=`<div class="tlh"><span class="chip${sel?"":" on"}" data-tlt="">すべて</span>${all.map(t=>`<span class="chip tag${t===sel?" on":""}" data-tlt="${esc(t)}">#${esc(t)} ${n[t]}</span>`).join("")}
+    <select id="tagListSort" title="並び順"><option value="new"${sort==="new"?" selected":""}>付けた順</option><option value="bpm"${sort==="bpm"?" selected":""}>BPM順</option><option value="name"${sort==="name"?" selected":""}>曲名順</option></select></div>`+
+    ids.map(id=>{ const t=S.tracks[id], m=S.meta[id]||{};
+      return `<div class="tl${id===S.now?" cur":""}" data-tln="${id}" title="押すとNowにする"><span class="nm">${esc(t.name)} <span class="muted">— ${esc(arts(t))}</span>${t.na?` <span class="na">リンク切れ</span>`:""}${sel?"":`<span class="tg">${tagsOf(id).map(x=>"#"+esc(x)).join(" ")}</span>`}</span><span class="m">${m.bpm?m.bpm.toFixed(1):"—"} ${m.key||""}</span></div>`; }).join(""); }
 function addTag(id,x){ const t=cleanTag(x); if(!t||tagsOf(id).includes(t)) return; setTags(id,[...tagsOf(id),t]); }
 function delTag(id,x){ setTags(id,tagsOf(id).filter(t=>t!==x)); }
 // 候補の曲にタグを付ける小窓（候補の「＃」か、候補のタグのチップを押すと開く）。候補欄の外に置くので、描き直しても閉じない
@@ -847,10 +869,10 @@ $("#tagPop").addEventListener("click",e=>{ e.stopPropagation(); const id=tagPopI
   if(e.target.closest("[data-tpclose]")) closeTagPop(); else if(a) addTag(id,a.dataset.tpadd); else if(d) delTag(id,d.dataset.tpdel); });
 document.addEventListener("keydown",e=>{ if(e.key==="Escape" && tagPopId){ closeTagPop(); } });
 window.addEventListener("resize",()=>placeTagPop());
-function renderTagFilter(){ const el=$("#fTag"); if(!el) return; const cur=LS.get("fTag",""), all=allTags();
+function renderTagFilter(){ renderTagList(); const el=$("#fTag"); if(!el) return; const cur=LS.get("fTag",""), all=allTags();
   el.innerHTML=`<option value="">すべて</option>`+all.map(t=>`<option${t===cur?" selected":""}>${esc(t)}</option>`).join("")+(cur&&!all.includes(cur)?`<option selected>${esc(cur)}</option>`:"");
   el.closest("label").hidden=!all.length && !cur; }
-function refresh(){ renderDeck(); renderHist(); renderCands(); renderInfo(); }
+function refresh(){ renderDeck(); renderHist(); renderCands(); renderInfo(); if($("#dTagList")?.open) renderTagList(); }
 
 function setNow(id, push=true){
   if(!S.tracks[id]) return;
@@ -1579,6 +1601,10 @@ for(const id of ["popMin","popMax"]){ const el=$("#"+id);
 $(".dual").ondblclick=()=>{ $("#popMin").value=0; $("#popMax").value=100; popShow(); LS.set("popMin",0); LS.set("popMax",100); renderCands(); };
 $("#fTag").onchange=e=>{ LS.set("fTag",e.target.value); renderCands(); };
 $("#fCc").onchange=e=>{ LS.set("fCc",e.target.value); renderCands(); };
+$("#tagListBox").onclick=e=>{ const c=e.target.closest("[data-tlt]"), r=e.target.closest("[data-tln]");
+  if(c){ LS.set("tagListTag",c.dataset.tlt); renderTagList(); } else if(r){ setNow(r.dataset.tln); } };
+$("#tagListBox").onchange=e=>{ if(e.target.id==="tagListSort"){ LS.set("tagListSort",e.target.value); renderTagList(); } };
+$("#dTagList").open=LS.get("dTagList",false); $("#dTagList").ontoggle=e=>{ LS.set("dTagList",e.target.open); if(e.target.open) renderTagList(); };
 function renderModes(){ const cur=LS.get("mode","flow");
   $("#modes").innerHTML=Object.entries(MODES).map(([k,v])=>`<button data-mode="${k}" class="${k===cur?"on":""}" title="${esc(v.tip)}">${v.label}</button>`).join("");
   $("#reroll").hidden=cur!=="surprise"; }
