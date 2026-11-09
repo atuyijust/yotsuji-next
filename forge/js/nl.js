@@ -141,7 +141,9 @@ export async function suggestThemeTracks({ theme, genres = [], yearFrom, yearTo,
     output_config: { effort: 'low', format: { type: 'json_schema', schema: THEME_SCHEMA } },
     system:
       'あなたは音楽に詳しい選曲家です。指定されたテーマ（季節・行事・場面）の時期によく流れる曲や、そのテーマを強く連想させる曲を挙げてください。' +
-      '曲名にテーマの単語が入っているかどうかは問いません。実在する曲だけを、Spotify で検索できる正式な曲名とアーティスト名で書いてください。定番を優先し、同じアーティストは 2 曲までにしてください。',
+      '曲名にテーマの単語が入っているかどうかは問いません。実在する曲だけを、Spotify で検索できる正式な曲名とアーティスト名で書いてください。' +
+      'パーティーやお店、ラジオ、定番プレイリストでその時期に実際によく流れる、誰もが知っている曲から順に並べてください（例: ハロウィンなら Thriller, Monster Mash, Ghostbusters, This Is Halloween のような曲が先）。' +
+      '雰囲気が暗いだけ・タイトルが似ているだけの曲は後回しにしてください。同じアーティストは 2 曲までにしてください。',
     messages: [{ role: 'user', content: `テーマ: ${theme}\n${cond.join('\n')}\n${n} 曲挙げてください。${avoidText}` }],
   });
   const block = res.content.find((b) => b.type === 'text');

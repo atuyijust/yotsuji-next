@@ -476,6 +476,15 @@ function renderTracks() {
     const top = Object.entries(s.drops).sort((a, b) => b[1] - a[1]).slice(0, 4);
     if (top.length) notes.push(`外れた理由：${top.map(([k, n]) => `${k} ${n} 曲`).join('、')}。いちばん多い条件をゆるめると増えます。`);
   }
+  if (s.theme) {
+    const th = s.theme;
+    notes.push(
+      `テーマの曲の出どころ：Last.fm のタグ ${th.fromLastfm} 曲、Claude ${th.fromClaude} 曲、両方 ${th.fromBoth} 曲。` +
+        (!th.claudeUsed ? '\nClaude の API キーがこのページに設定されていないため、Last.fm のタグだけで選んでいます（Last.fm のタグは洋楽のマニアックな曲に偏りがちです）。「設定」でキーを入れると、誰もが知っている定番曲が増えます。' : '') +
+        (th.claudeError ? `\nClaude への問い合わせに失敗しました：${th.claudeError}` : '') +
+        (th.soundActive ? '\nBPM などのサウンド条件が付いています。定番曲がこの条件で外れていることがあるので、テーマで探すときは外すのがおすすめです。' : ''),
+    );
+  }
   if (s.nearUsed) notes.push(`条件どおりの曲だけでは足りなかったため、サウンドの範囲からわずかに外れた曲を ${s.nearUsed} 曲入れています（一覧の後ろの方）。`);
   if (s.relaxedCap) notes.push(`足りない分を補うため、${s.relaxedCap} 組のアーティストは上限より 1 曲多く入れています。`);
   if (s.noLastfm) notes.push('Last.fm の API キーが未設定のため、似ている曲の精度が低くなっています。「設定」でキーを入れてください。');

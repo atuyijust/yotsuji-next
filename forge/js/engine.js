@@ -59,6 +59,8 @@ export async function generate(c, onProgress = () => {}) {
   const seedTrackSet = new Set(seedTracks.map((t) => t.id));
   const seedTrackKeys = new Set(seedTracks.map((t) => `${norm(t.artist)}|${baseTitle(t.name)}`));
   const hasSimilarSeeds = ((c.seedArtists || []).length > 0 && c.seedMode !== 'only') || seedTracks.length > 0;
+  let claudeUsed = false;
+  let claudeError = '';
   // テーマ（例: halloween）。指定したら、テーマに合う曲だけから選ぶ（年代・国・サウンドは絞り込みとして効く）
   const tTags = themeTags(c.theme);
   const themeMode = tTags.length > 0;
@@ -70,8 +72,8 @@ export async function generate(c, onProgress = () => {}) {
     return kwWords.every((w) => hay.includes(w));
   };
 
-  // themeHit: テーマの別々の根拠（タグ・Claude）で何回見つかったか
-  const add = (t, source, weight = 0, themeHit = 0) => {
+  // themeFrom: テーマの根拠（'lf' = Last.fm のタグ、'ai' = Claude）。両方で見つかった曲ほど確か
+  const add = (t, source, weight = 0, themeFrom = '') => {
     if (!t?.id) return;
     let e = pool.get(t.id);
     if (!e) {
@@ -81,7 +83,8 @@ export async function generate(c, onProgress = () => {}) {
       Object.assign(e, t, { sources: e.sources, partial: false });
     }
     e.sources.set(source, Math.max(e.sources.get(source) || 0, weight));
-    if (themeHit) e.themeHits = (e.themeHits || 0) + themeHit;
+    if (themeFrom === 'lf') e.themeLf = Math.max(e.themeLf || 0, weight);
+    if (themeFrom === 'ai') e.themeAi = Math.max(e.themeAi || 0, weight);
   };
 
   const searchPages = async (query, n, filterFn) => {
@@ -393,7 +396,9 @@ export async function generate(c, onProgress = () => {}) {
         await Promise.all(
           pick.map(async (t) => {
             const tr = await sp.resolveTrack(t.artist, t.name, yf).catch(() => null);
-            if (tr) add(tr, source, weight * (1 - Math.min(0.5, t.rank / 1000)), source === 'theme' ? 1 : 0);
+            // テーマのタグは上位ほど確か（下位は数人が付けただけのことが多い）
+            const decay = source === 'theme' ? Math.min(0.6, t.rank / 500) : Math.min(0.5, t.rank / 2000);
+            if (tr) add(tr, source, weight * (1 - decay), source === 'theme' ? 'lf' : '');
           }),
         );
         if (!buffer.length && page >= Math.min(totalPages, 20)) ex.done = true;
@@ -410,6 +415,7 @@ export async function generate(c, onProgress = () => {}) {
     if (!useLastfm && !getClaudeKey()) {
       throw new Error('テーマで探すには、Last.fm の API キーか Claude の API キーが必要です。「設定」で入力してください');
     }
+    claudeUsed = !!getClaudeKey();
     // Claude に定番曲を挙げてもらう。足りなければ「挙げ済み以外で」と何度か頼む（音の条件も伝えて、絞り込みで外れにくくする）
     if (getClaudeKey()) {
       const asked = new Set();
@@ -440,6 +446,8 @@ export async function generate(c, onProgress = () => {}) {
             n: Math.min(150, Math.max(60, Math.ceil(size * 0.8))),
           }).catch((e) => {
             console.warn('[playlist-forge] theme picks', e);
+            claudeError = e?.message || String(e);
+            ex.done = true;
             return [];
           });
           const fresh = picks.filter((t) => !asked.has(`${t.title} / ${t.artist}`));
@@ -449,7 +457,7 @@ export async function generate(c, onProgress = () => {}) {
             fresh.map(async (t, i) => {
               if (excludeArtistNames.has(norm(t.artist)) || scriptExcluded(`${t.artist} ${t.title}`)) return;
               const tr = await sp.resolveTrack(t.artist, t.title, yf).catch(() => null);
-              if (tr) add(tr, 'theme', 0.5 - Math.min(0.15, (rounds - 1) * 0.03 + i / 1000), 1);
+              if (tr) add(tr, 'theme', 0.55 - Math.min(0.2, (rounds - 1) * 0.04 + i / 600), 'ai');
             }),
           );
         },
@@ -756,8 +764,8 @@ export async function generate(c, onProgress = () => {}) {
     const srcBonus = Math.max(0, ...t.sources.values()) + 0.05 * (t.sources.size - 1);
     // 人気度（メジャーさ）。似たアーティスト探しでは控えめ、ジャンル・年代指定では強め
     // テーマでは「その時期に聴かれているか」を優先し、人気度は控えめに
-    const popWeight = activeKeys.has('popularity') ? 0.1 : themeMode ? 0.15 : hasSimilarSeeds ? 0.2 : 0.45;
-    const themeBonus = themeMode ? Math.min(0.3, 0.1 * ((t.themeHits || 1) - 1)) : 0;
+    const popWeight = activeKeys.has('popularity') ? 0.1 : themeMode ? 0.3 : hasSimilarSeeds ? 0.2 : 0.45;
+    const themeBonus = themeMode && t.themeLf && t.themeAi ? 0.25 : 0;
     const popBonus = t.popularity != null ? (t.popularity / 100) * popWeight : 0;
     // 国を除外する指定で国が分からなかった曲は、分かっている曲より後ろに
     const unknownPenalty = exc.size && t.countryUnknown ? 0.12 : 0;
@@ -837,6 +845,16 @@ export async function generate(c, onProgress = () => {}) {
       candidates: totalCandidates,
       keywordDropped,
       drops,
+      theme: themeMode
+        ? {
+            claudeUsed,
+            claudeError,
+            fromLastfm: picked.filter((t) => t.themeLf && !t.themeAi).length,
+            fromClaude: picked.filter((t) => t.themeAi && !t.themeLf).length,
+            fromBoth: picked.filter((t) => t.themeAi && t.themeLf).length,
+            soundActive: active.length > 0,
+          }
+        : null,
       keywords: c.keywords || '',
       withFeatures,
       matched: cands.filter((t) => !(t.miss > 0)).length,
