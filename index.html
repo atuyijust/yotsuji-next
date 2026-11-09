@@ -80,7 +80,7 @@
   .gp{display:inline-block;font:600 11px/1.5 system-ui,sans-serif;padding:0 7px;border-radius:9px;margin-left:5px;vertical-align:2px;white-space:nowrap;
     color:hsl(var(--h) 70% 72%);background:hsl(var(--h) 45% 20% / .55);border:1px solid hsl(var(--h) 45% 38%)}
   .na{font:600 10px var(--mono);color:var(--warn);border:1px solid var(--warn);border-radius:3px;padding:0 4px;vertical-align:3px}
-  .gj{font-size:11px;margin-left:6px;vertical-align:2px} .gj.g{color:var(--accent)} .gj.y{color:var(--accent2)} .gj.r{color:var(--warn)}
+  .gj{font-size:11px;margin-left:6px;vertical-align:2px;white-space:nowrap} .gj.g{color:var(--accent)} .gj.y{color:var(--accent2)} .gj.r{color:var(--warn)}
   .gp.none{--h:0;color:var(--dim);background:none;border-color:var(--line);font-weight:400}
   .deck .gps{margin-top:4px} .deck .gps .gp{margin:0 4px 0 0;font-size:12px}
   .cand{display:grid;grid-template-columns:34px 44px 1fr 70px 52px auto;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid var(--line)}
@@ -194,6 +194,8 @@
     aside > *{order:3;margin-left:calc(12px + env(safe-area-inset-left));margin-right:calc(12px + env(safe-area-inset-right))}
     aside > h2:first-child{order:1;margin-top:12px}
     #deck{order:1}
+    #q,#sres{order:1} #q{margin-top:10px} #sres{margin-top:4px}
+    aside > h2:has(+ #q){display:none}
     section.list{order:2;padding:0 calc(12px + env(safe-area-inset-right)) 10px calc(12px + env(safe-area-inset-left));border-bottom:1px solid var(--line);margin-bottom:6px}
     aside > #info{margin-top:12px}
     #q{width:calc(100% - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)) !important;box-sizing:border-box}
@@ -232,7 +234,7 @@
     <div class="bk"><label class="ck" title="Spotify / Deezer / MusicBrainz / Discogs / Wikipedia から曲・アーティスト情報を自動で集めます"><input type="checkbox" id="autoInfo" checked> 曲情報を自動収集</label></div>
 
     <h2>ライブラリから選ぶ</h2>
-    <input id="q" placeholder="曲名・アーティストで検索（/ で移動、Enterで決定）" style="width:100%">
+    <input id="q" placeholder="曲名・アーティストで検索（/ で移動、Enterで決定）" style="width:100%" enterkeyhint="go" autocomplete="off" autocapitalize="off" spellcheck="false">
     <div class="search-res" id="sres"></div>
 
     <details class="side" id="dWeights" open><summary><h2>重み付け</h2></summary>

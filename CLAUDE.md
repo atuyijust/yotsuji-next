@@ -76,7 +76,7 @@ Spotify（人気度・レーベル・リリース・アーティストのジャ�
 - 再生／キュー（`play`/`queue` → `withDevice`）: 404（動いているデバイスなし）なら `/me/player/devices` から開いているSpotify（アクティブ→Computer→Smartphone）を選んで `device_id` 付きで再送。403＝Premiumのみ等は `playErr` で日本語の理由を出す。NOW PLAYING（デッキ）にも ▶ 再生。再生ボタン自体は Now を変えない（ユーザー指定）。追従ONなら、Spotifyで流れ始めた曲は通常どおり追従が拾う（特別扱いはしない＝ユーザー指定「余計なことしなくていい」）。指示が通っても Mac の Spotify アプリが曲を読み込まず「無」になることがあるので、`confirmPlay` で `/me/player` の曲を確認 → 違えばアルバム文脈（`context_uri`+`offset`）で再送 → それでもだめなら `spotify:track:` リンクでアプリに曲を開く。`toast()` は画面下にも浮かせて出す（#status だけだと押しても反応がないように見えた）
 - ライブラリ画面: 「選択したプレイリストを読み込む」(`#scan`) はプレイリスト一覧のすぐ下（最下部だと分かりにくい、とユーザー指摘）。横に選択数（`selCount`）、0本なら押せない。下部は「閉じる」だけ
 - DJモード（`setDj`）: 再生／キューボタンを隠し追従を止める
-- モバイル（@media max-width:760px）: 1カラム、`#mobileNow` 固定バー、`<details class="side">` で重み付け／履歴を折りたたみ
+- モバイル（@media max-width:760px、iPhone 15 Pro 393×852 基準。ユーザー指定）: 1カラム。`aside{display:contents}` と `order` で 「Now Playing → 検索 → 候補 → 曲情報・重み付け・タグの曲・履歴」の順に並べ替え（候補が最初の画面に入る）。`#mobileNow` 固定バー、`<details class="side">` で重み付け／履歴を折りたたみ。`viewport-fit=cover` と `env(safe-area-inset-*)` でノッチ／ホームバーを避ける（status-bar-style black）
 
 ## Playlist Forge（`forge/`）
 - 条件（ジャンル・年代・国・BPM・似せたい曲／アーティストなど）から Spotify 全体を探してプレイリストを作る別ページ。公開URL: https://atuyijust.github.io/yotsuji-next/forge/
