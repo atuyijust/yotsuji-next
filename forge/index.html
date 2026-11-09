@@ -84,6 +84,12 @@
             <input id="label-input" placeholder="レーベル名を入力して Enter（例: Motown）" />
           </div>
           <div class="field">
+            <label for="theme">テーマ</label>
+            <input id="theme" list="theme-list" placeholder="季節・行事・場面（例: ハロウィン、クリスマス、夏）" />
+            <datalist id="theme-list"></datalist>
+            <p class="hint">曲名に含むかどうかではなく、その時期によく流れる曲・連想される曲を集めます（Last.fm のタグと Claude）。年代・国・サウンドの条件で絞り込めます。</p>
+          </div>
+          <div class="field">
             <label for="keywords">キーワード</label>
             <input id="keywords" placeholder="曲名・アルバム名に含まれる語で絞り込む（任意）" />
           </div>

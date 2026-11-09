@@ -1,7 +1,8 @@
 // 候補収集 → 特徴量取得 → 絞り込み → スコアリング → 選曲
 import * as sp from './spotify.js';
 import * as src from './sources.js';
-import { FEATURES } from './data.js';
+import { FEATURES, themeTags } from './data.js';
+import { suggestThemeTracks } from './nl.js';
 import { norm, baseTitle, shuffle, pLimit } from './util.js';
 
 const FEAT_DEF = Object.fromEntries(FEATURES.map((f) => [f.key, f]));
@@ -58,6 +59,9 @@ export async function generate(c, onProgress = () => {}) {
   const seedTrackSet = new Set(seedTracks.map((t) => t.id));
   const seedTrackKeys = new Set(seedTracks.map((t) => `${norm(t.artist)}|${baseTitle(t.name)}`));
   const hasSimilarSeeds = ((c.seedArtists || []).length > 0 && c.seedMode !== 'only') || seedTracks.length > 0;
+  // テーマ（例: halloween）。指定したら、テーマに合う曲だけから選ぶ（年代・国・サウンドは絞り込みとして効く）
+  const tTags = themeTags(c.theme);
+  const themeMode = tTags.length > 0;
   // キーワードは「曲名・アルバム名・アーティスト名に全部の語が含まれる曲だけ」の絞り込みとして使う
   const kwWords = norm(c.keywords || '').split(/\s+/).filter(Boolean);
   const hasKeywords = (t) => {
@@ -239,6 +243,7 @@ export async function generate(c, onProgress = () => {}) {
 
   // ---- 1. 候補を集める（一度だけ実行するもの） ----
   log('候補曲を集めています…', 5);
+  if (!themeMode) {
 
   // レーベル（アルバム検索 → 収録曲）
   for (const label of c.labels || []) {
@@ -319,6 +324,8 @@ export async function generate(c, onProgress = () => {}) {
   await Promise.all(tasks);
   tasks.length = 0;
 
+  }
+
   // ---- 2. 足りなければ何度でも追加で集める候補源 ----
   const expanders = [];
   // ジャンル検索（ページを進めていく）
@@ -337,16 +344,16 @@ export async function generate(c, onProgress = () => {}) {
     };
     return ex;
   };
-  for (const g of c.genres || []) expanders.push(searchExpander(join(`genre:${q(g)}`, yf), 'genre', 0.1));
+  if (!themeMode) for (const g of c.genres || []) expanders.push(searchExpander(join(`genre:${q(g)}`, yf), 'genre', 0.1));
   // キーワードだけで探すのは、ほかに手がかりがないときだけ（単語が似ているだけの曲を集めないため）
   const otherSources = (c.genres || []).length || (c.seedArtists || []).length || seedTracks.length || (c.labels || []).length || (c.countries || []).length || c.useMyTop;
-  if (kwWords.length && !otherSources) expanders.push(searchExpander(join(c.keywords, yf), 'keyword', 0.1));
+  if (kwWords.length && !otherSources && !themeMode) expanders.push(searchExpander(join(c.keywords, yf), 'keyword', 0.1));
 
   // Last.fm のタグ（ジャンル・年代）の定番曲。よく聴かれている代表曲なので重みを高めに
   const decadeTag = decadeTagOf(c);
   const hasSeeds = (c.seedArtists || []).length > 0 || seedTracks.length > 0;
   const tagList = [];
-  if (useLastfm) {
+  if (useLastfm && !themeMode) {
     if (decadeTag && ((c.genres || []).length || (!hasSeeds && !(c.labels || []).length))) tagList.push([decadeTag, 0.3]);
     for (const g of (c.genres || []).slice(0, 4)) {
       if (decadeTag) tagList.push([`${decadeTag} ${g}`, 0.3]);
@@ -354,7 +361,7 @@ export async function generate(c, onProgress = () => {}) {
     }
   }
   const tagTried = new Map(); // アーティスト → 照合した曲数
-  const tagExpander = (tag, weight) => {
+  const tagExpander = (tag, weight, source = 'tag') => {
     let page = 0;
     let totalPages = 1;
     let buffer = [];
@@ -384,7 +391,7 @@ export async function generate(c, onProgress = () => {}) {
         await Promise.all(
           pick.map(async (t) => {
             const tr = await sp.resolveTrack(t.artist, t.name, yf).catch(() => null);
-            if (tr) add(tr, 'tag', weight * (1 - Math.min(0.5, t.rank / 2000)));
+            if (tr) add(tr, source, weight * (1 - Math.min(0.5, t.rank / 2000)));
           }),
         );
         if (!buffer.length && page >= Math.min(totalPages, 20)) ex.done = true;
@@ -394,8 +401,36 @@ export async function generate(c, onProgress = () => {}) {
   };
   for (const [tag, w] of tagList) expanders.push(tagExpander(tag, w));
 
+  // テーマ：Last.fm でそのテーマのタグが付いた曲（聴いた人が「ハロウィンの曲」と認めている曲）＋ Claude が挙げた定番曲
+  if (themeMode) {
+    if (useLastfm) tTags.forEach((tag, i) => expanders.push(tagExpander(tag, i === 0 ? 0.4 : 0.3, 'theme')));
+    log(`「${c.theme}」に合う曲を集めています…`, 10);
+    const picks = await suggestThemeTracks({
+      theme: c.theme,
+      genres: c.genres || [],
+      yearFrom: c.yearFrom,
+      yearTo: c.yearTo,
+      countries: c.countries || [],
+      excludeCountries: c.excludeCountries || [],
+      n: Math.min(150, Math.max(60, Math.ceil(size * 0.8))),
+    }).catch((e) => {
+      console.warn('[playlist-forge] theme picks', e);
+      return [];
+    });
+    await Promise.all(
+      picks.map(async (t, i) => {
+        if (excludeArtistNames.has(norm(t.artist)) || scriptExcluded(`${t.artist} ${t.title}`)) return;
+        const tr = await sp.resolveTrack(t.artist, t.title, yf).catch(() => null);
+        if (tr) add(tr, 'theme', 0.45 - Math.min(0.15, i / 1000));
+      }),
+    );
+    if (!useLastfm && !picks.length) {
+      throw new Error('テーマで探すには、Last.fm の API キーか Claude の API キーが必要です。「設定」で入力してください');
+    }
+  }
+
   // 条件に合った曲のアーティストに「似ているアーティスト」の代表曲（Last.fm）。他の候補源が尽きても広げ続けられる
-  if (useLastfm) {
+  if (useLastfm && !themeMode) {
     const usedHubs = new Set();
     const relTried = new Set();
     const ex = {
@@ -602,7 +637,11 @@ export async function generate(c, onProgress = () => {}) {
     await Promise.all(expanders.map((e) => e.next()));
   }
   if (!pool.size) {
-    throw new Error('条件に合う候補曲が見つかりませんでした。ジャンル・アーティスト・レーベル・キーワードのどれかを指定するか、条件をゆるめてください');
+    throw new Error(
+      themeMode
+        ? `テーマ「${c.theme}」に合う曲が見つかりませんでした。英語のテーマ名（例: halloween, christmas）にするか、年代などの条件をゆるめてください`
+        : '条件に合う候補曲が見つかりませんでした。ジャンル・アーティスト・レーベル・キーワードのどれかを指定するか、条件をゆるめてください',
+    );
   }
   await evaluateNew(35);
   const startedAt = Date.now();

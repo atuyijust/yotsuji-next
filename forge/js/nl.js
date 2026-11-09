@@ -1,7 +1,7 @@
 // 文章（フリーワード）→ 検索条件 への変換
 //  - Claude API キーがあれば Claude で解釈（高精度）
 //  - なければ簡易ルールで解釈
-import { FEATURE_KEYS, GENRES, COUNTRIES, MOODS } from './data.js';
+import { FEATURE_KEYS, GENRES, COUNTRIES, MOODS, THEMES } from './data.js';
 import { store } from './util.js';
 
 export const getClaudeKey = () => store.get('spm.claudeKey', '');
@@ -14,7 +14,7 @@ const SCHEMA = {
   additionalProperties: false,
   required: [
     'playlistName', 'explanation', 'genres', 'seedTracks', 'seedArtists', 'seedMode', 'labels', 'keywords',
-    'yearFrom', 'yearTo', 'monthFrom', 'monthTo', 'countries', 'excludeCountries', 'features', 'mode', 'excludeExplicit', 'size',
+    'theme', 'yearFrom', 'yearTo', 'monthFrom', 'monthTo', 'countries', 'excludeCountries', 'features', 'mode', 'excludeExplicit', 'size',
   ],
   properties: {
     playlistName: { type: 'string', description: 'プレイリスト名（日本語可・短く）' },
@@ -34,6 +34,7 @@ const SCHEMA = {
     seedMode: { type: 'string', enum: ['include', 'similar', 'only'], description: 'include=本人の曲＋似た曲, similar=本人以外の似たアーティストのみ, only=本人の曲のみ' },
     labels: { type: 'array', items: { type: 'string' }, description: 'レコードレーベル名（指定があれば）' },
     keywords: { type: 'string', description: '曲名・アルバム名に必ず含まれるべき語（「タイトルに love が入る曲」のように明示された場合だけ。それ以外は必ず空文字）' },
+    theme: { type: 'string', description: '季節・行事・場面のテーマ（例: ハロウィン、クリスマス、夏、雨、卒業）。その時期によく流れる曲・連想される曲を集めるためのもの。なければ空文字' },
     yearFrom: { type: ['integer', 'null'] },
     yearTo: { type: ['integer', 'null'] },
     monthFrom: { type: ['integer', 'null'], description: 'リリース開始月（1-12）。月の指定がある場合のみ。yearFrom とセット' },
@@ -71,6 +72,7 @@ const SYSTEM = `あなたは Spotify プレイリスト作成アプリの条件�
 - 「〇〇みたいな」「〇〇っぽい」など、アーティスト名が出てきたら seedArtists に入れる。「〇〇以外で」「〇〇本人は除いて」なら seedMode は similar。特に指定がなければ include。
 - 曲名が出てきたら（例:「Cramp Your Style Breakestra」「September / Earth, Wind & Fire みたいな曲」）、その曲に似た曲を求めていると解釈し、seedTracks に { title, artist } で入れる。曲名やアーティスト名を keywords に入れてはいけない。
 - 曲名だけで似た曲を求めている場合、ジャンル・年代・国は文中に明示されたときだけ入れる（曲から推測して足さない。似た曲探しの邪魔になるため）。
+- ハロウィン・クリスマス・夏・雨・卒業など季節や行事のテーマは theme に入れる（keywords には入れない）。テーマから BPM などの範囲を推測して足さない。
 - 指定されていない項目は空配列・null・空文字・any・false にする。`;
 
 let sdkPromise = null;
@@ -96,6 +98,53 @@ async function viaClaude(text, apiKey) {
   for (const f of out.features || []) features[f.key] = [Math.min(f.min, f.max), Math.max(f.min, f.max)];
   const seedTracks = (out.seedTracks || []).map((t) => ({ name: t.title, artist: t.artist }));
   return { ...out, seedTracks, features, via: 'claude' };
+}
+
+// ---------------- テーマに合う曲を Claude に挙げてもらう ----------------
+// 返すのは {title, artist} の配列。実在するかは呼び出し側で Spotify に照合して確かめる
+const THEME_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['tracks'],
+  properties: {
+    tracks: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['title', 'artist'],
+        properties: { title: { type: 'string' }, artist: { type: 'string' } },
+      },
+    },
+  },
+};
+
+export async function suggestThemeTracks({ theme, genres = [], yearFrom, yearTo, countries = [], excludeCountries = [], n = 80 }) {
+  const apiKey = getClaudeKey();
+  if (!apiKey) return [];
+  sdkPromise ??= import(SDK_URL);
+  const { default: Anthropic } = await sdkPromise;
+  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
+  const cond = [
+    genres.length ? `ジャンル: ${genres.join(', ')}` : '',
+    yearFrom || yearTo ? `リリース年: ${yearFrom || ''}〜${yearTo || ''}` : '',
+    countries.length ? `アーティストの国: ${countries.join(', ')}` : '',
+    excludeCountries.length ? `除外する国: ${excludeCountries.join(', ')}` : '',
+  ].filter(Boolean);
+  const res = await client.beta.messages.create({
+    model: MODEL,
+    max_tokens: 8000,
+    betas: ['server-side-fallback-2026-07-01'],
+    fallbacks: 'default',
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: THEME_SCHEMA } },
+    system:
+      'あなたは音楽に詳しい選曲家です。指定されたテーマ（季節・行事・場面）の時期によく流れる曲や、そのテーマを強く連想させる曲を挙げてください。' +
+      '曲名にテーマの単語が入っているかどうかは問いません。実在する曲だけを、Spotify で検索できる正式な曲名とアーティスト名で書いてください。定番を優先し、同じアーティストは 2 曲までにしてください。',
+    messages: [{ role: 'user', content: `テーマ: ${theme}\n${cond.join('\n')}\n${n} 曲挙げてください。` }],
+  });
+  const block = res.content.find((b) => b.type === 'text');
+  if (!block) return [];
+  return (JSON.parse(block.text).tracks || []).filter((t) => t.title && t.artist);
 }
 
 // ---------------- 簡易ルール ----------------
@@ -218,6 +267,13 @@ function viaRules(text) {
   if (m) out.size = Number(m[1]);
 
   if (/クリーン|子供|こども/.test(t)) out.excludeExplicit = true;
+
+  // テーマ（季節・行事）
+  const th = THEMES.find((x) => x.words.test(t));
+  if (th) {
+    out.theme = th.label;
+    notes.push(th.label);
+  }
 
   // 何も読み取れなかったら、曲名＋アーティスト名かもしれないのでキーワードに入れておく（検索時に曲として照合する）
   if (!out.genres.length && !out.seedArtists.length && !out.yearFrom && !notes.length && !Object.keys(out.features).length) out.keywords = text.trim();

@@ -1,7 +1,7 @@
 import * as sp from './spotify.js';
 import { generate, orderTracks } from './engine.js';
 import { parseRequest, getClaudeKey } from './nl.js';
-import { FEATURES, GENRES, COUNTRIES, COUNTRY_NAME, MOODS, ORDERS } from './data.js';
+import { FEATURES, GENRES, COUNTRIES, COUNTRY_NAME, MOODS, ORDERS, THEMES, themeOf } from './data.js';
 import { store, esc, norm } from './util.js';
 
 const $ = (s) => document.querySelector(s);
@@ -247,6 +247,11 @@ async function resolveSeedNames() {
       if (!state.seedTracks.some((s) => s.id === found.id)) state.seedTracks.push(seedTrackOf(found));
       $('#keywords').value = '';
       toast(`キーワードを「似せたい曲：${found.name} – ${found.artists[0]?.name}」に置き換えました`);
+    } else if (themeOf(kw) && !$('#theme').value.trim()) {
+      // 「halloween」のような行事・季節の語は、曲名の絞り込みではなくテーマとして使う
+      $('#theme').value = themeOf(kw).label;
+      $('#keywords').value = '';
+      toast(`キーワード「${kw}」をテーマに移しました（その時期によく流れる曲を集めます）`);
     } else if (looksLikeGenre(kw)) {
       // 「hardcore punk」のようなジャンル名は、曲名の絞り込みではなくジャンルとして使う
       const g = kw.toLowerCase();
@@ -305,6 +310,7 @@ function collectCriteria() {
     seedTracks: state.seedTracks.map((t) => ({ ...t })),
     labels: [...state.labels],
     keywords: $('#keywords').value.trim(),
+    theme: $('#theme').value.trim(),
     useMyTop: $('#use-mytop').checked,
     yearFrom: num('#year-from'),
     yearTo: num('#year-to'),
@@ -345,6 +351,7 @@ function applyCriteria(c, { merge = false } = {}) {
     if (v !== undefined) $(sel).value = v ?? '';
   };
   setVal('#keywords', pick('keywords', ''));
+  setVal('#theme', pick('theme', ''));
   setVal('#year-from', pick('yearFrom', null));
   setVal('#year-to', pick('yearTo', null));
   setVal('#month-from', pick('monthFrom', null));
@@ -405,8 +412,8 @@ async function runGenerate() {
     await resolveSeedNames();
     const c = collectCriteria();
     store.set('spm.lastCriteria', c);
-    if (!c.genres.length && !c.seedArtists.length && !c.seedTracks.length && !c.labels.length && !c.keywords && !c.useMyTop && !c.countries.length) {
-      throw new Error('ジャンル・似せたい曲・似せたいアーティスト・レーベル・キーワード・国のうち、少なくとも 1 つを指定してください（文章で指定してもOKです）');
+    if (!c.theme && !c.genres.length && !c.seedArtists.length && !c.seedTracks.length && !c.labels.length && !c.keywords && !c.useMyTop && !c.countries.length) {
+      throw new Error('ジャンル・テーマ・似せたい曲・似せたいアーティスト・レーベル・キーワード・国のうち、少なくとも 1 つを指定してください（文章で指定してもOKです）');
     }
     const { tracks, stats } = await generate(c, setProgress);
     state.tracks = tracks;
@@ -436,6 +443,7 @@ async function runGenerate() {
 
 function suggestName(c) {
   const parts = [];
+  if (c.theme) parts.push(themeOf(c.theme)?.label || c.theme);
   if (c.seedTracks.length) parts.push(`${c.seedTracks.map((t) => t.name).join('・')} 好きに`);
   else if (c.seedArtists.length) parts.push(`${c.seedArtists.map((a) => a.name).join('・')} 好きに`);
   if (c.monthFrom || c.monthTo) {
@@ -448,7 +456,7 @@ function suggestName(c) {
   return parts.join(' ') || 'My Mix';
 }
 
-const SRC_LABEL = { seed: '指定', similar: '似ている', genre: 'ジャンル', label: 'レーベル', keyword: 'キーワード', country: '国', mytop: 'あなた向け', tag: '定番', related: '関連' };
+const SRC_LABEL = { seed: '指定', similar: '似ている', genre: 'ジャンル', label: 'レーベル', keyword: 'キーワード', country: '国', mytop: 'あなた向け', tag: '定番', related: '関連', theme: 'テーマ' };
 
 function renderTracks() {
   const list = $('#tracks');
@@ -623,6 +631,7 @@ async function runNL() {
       seedTracks: r.seedTracks || [],
       labels: r.labels,
       keywords: r.keywords,
+      theme: r.theme || '',
       yearFrom: r.yearFrom,
       yearTo: r.yearTo,
       monthFrom: r.monthFrom ?? null,
@@ -752,6 +761,7 @@ function init() {
   }
 
   setupArtistSearch();
+  $('#theme-list').innerHTML = THEMES.map((t) => `<option value="${t.label}"></option>`).join('');
   setupSettings();
 
   $('#btn-login').addEventListener('click', () => {

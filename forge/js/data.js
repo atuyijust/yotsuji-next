@@ -59,3 +59,29 @@ export const ORDERS = [
   ['yearAsc', '年代順（古い→新しい）'],
   ['popularity', '人気順'],
 ];
+
+// テーマ（季節・行事・場面）→ Last.fm のタグ。曲名に含む語ではなく「連想される曲」を集めるのに使う
+export const THEMES = [
+  { key: 'halloween', label: 'ハロウィン', words: /ハロウィン|ハロウィーン|halloween/i, tags: ['halloween', 'spooky', 'horror', 'creepy', 'halloween songs'] },
+  { key: 'christmas', label: 'クリスマス', words: /クリスマス|x'?mas|christmas/i, tags: ['christmas', 'christmas songs', 'xmas', 'holiday', 'christmas music'] },
+  { key: 'valentine', label: 'バレンタイン', words: /バレンタイン|valentine/i, tags: ['valentine', 'love songs', 'love', 'romantic'] },
+  { key: 'summer', label: '夏', words: /夏|サマー|summer/i, tags: ['summer', 'summer vibes', 'beach', 'summer songs'] },
+  { key: 'winter', label: '冬', words: /冬|ウィンター|winter/i, tags: ['winter', 'snow', 'cold'] },
+  { key: 'spring', label: '春', words: /春|桜|spring/i, tags: ['spring', 'sakura'] },
+  { key: 'autumn', label: '秋', words: /秋|autumn|fall/i, tags: ['autumn', 'fall'] },
+  { key: 'rain', label: '雨', words: /雨|梅雨|rain/i, tags: ['rain', 'rainy day', 'rainy'] },
+  { key: 'graduation', label: '卒業', words: /卒業|graduation/i, tags: ['graduation', 'farewell'] },
+  { key: 'new year', label: '新年', words: /新年|正月|new year/i, tags: ['new year', 'new years eve'] },
+  { key: 'wedding', label: '結婚式', words: /結婚式|ウェディング|wedding/i, tags: ['wedding', 'wedding songs', 'love songs'] },
+  { key: 'birthday', label: '誕生日', words: /誕生日|バースデー|birthday/i, tags: ['birthday'] },
+];
+export const themeOf = (text) => {
+  const t = String(text || '').trim();
+  if (!t) return null;
+  return THEMES.find((x) => x.key === t.toLowerCase() || x.words.test(t)) || null;
+};
+// テーマ → 使う Last.fm タグ（登録がなければ入力した語をそのままタグに）
+export const themeTags = (text) => {
+  const th = themeOf(text);
+  return th ? th.tags : String(text || '').trim() ? [String(text).trim().toLowerCase()] : [];
+};
