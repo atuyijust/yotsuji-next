@@ -512,7 +512,7 @@ function renderTracks() {
           <div class="tags">${src ? (x.themeWhy?.length ? `<button type="button" class="tag src why" title="${esc('テーマに入った理由\n・' + x.themeWhy.join('\n・'))}">${SRC_LABEL[src] || src} ⓘ</button>` : `<span class="tag src">${SRC_LABEL[src] || src}</span>`) : ''}${tags.map((g) => `<span class="tag">${g}</span>`).join('')}</div>
         </div>
         <div class="acts">
-          <button class="btn-sm act-copy" title="曲名とアーティスト名をコピー">⎘</button>
+          <button class="btn-sm act-copy" title="「アーティスト名 - 曲名」をコピー">コピー</button>
           <button class="btn-sm act-queue" title="Spotify のキューに追加">キュー</button>
           <button class="btn-sm act-play" title="Spotify で再生（開いている PC／スマホの Spotify で鳴らします）">再生</button>
           <button class="icon-btn up" title="上へ">↑</button>
@@ -637,15 +637,21 @@ async function queueInApp(t) {
   }
 }
 
-async function copyTitle(t) {
-  const text = `${t.name} ${t.artists.map((a) => a.name).join(' ')}`;
+// 「アーティスト名 - 曲名」の形でコピー（1 曲、または一覧の全曲を 1 行ずつ）
+const artistTitle = (t) => `${t.artists.map((a) => a.name).join(', ')} - ${t.name}`;
+async function copyText(text, msg) {
   try {
     await navigator.clipboard.writeText(text);
-    toast(`コピー：${text}`);
+    toast(msg);
   } catch {
     toast('コピーできませんでした');
   }
 }
+const copyTitle = (t) => copyText(artistTitle(t), `コピー：${artistTitle(t)}`);
+const copyAll = () => {
+  if (!state.tracks.length) return;
+  copyText(state.tracks.map(artistTitle).join('\n'), `${state.tracks.length} 曲の「アーティスト名 - 曲名」をコピーしました`);
+};
 
 
 
@@ -894,6 +900,7 @@ function init() {
   $('#pl-name').addEventListener('input', () => ($('#pl-name').dataset.edited = '1'));
   $('#btn-generate').addEventListener('click', runGenerate);
   $('#btn-regen').addEventListener('click', runGenerate);
+  $('#btn-copy-all').addEventListener('click', copyAll);
   $('#btn-save').addEventListener('click', savePlaylist);
   $('#btn-nl').addEventListener('click', runNL);
   $('#nl-input').addEventListener('keydown', (e) => {

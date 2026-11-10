@@ -233,7 +233,7 @@ a.btn { text-decoration: none; color: inherit; display: inline-flex; align-items
 @media (max-width: 700px) {
   .track { grid-template-columns: 22px 40px minmax(0, 1fr) auto; gap: 8px; }
   .track img, .track .ph { width: 40px; height: 40px; }
-  .track .up, .track .act-copy, .track .act-queue { display: none; }
+  .track .up { display: none; }
 }
 
 .player {
