@@ -217,6 +217,18 @@ export async function resolveTrack(artist, title, yearFilter = '') {
   return best;
 }
 
+// ISRC（曲ごとの国際コード）→ Spotify の曲。Deezer などほかのサービスの曲を正確に照合する
+export async function resolveIsrc(isrc, yearFilter = '') {
+  const k = `v3|isrc|${isrc}|${yearFilter}`;
+  if (k in resolveCache) return resolveCache[k];
+  const items = await searchTracks([`isrc:${isrc}`, yearFilter].filter(Boolean).join(' '), 0);
+  const best = items[0] || null;
+  resolveCache[k] = best;
+  clearTimeout(resolveTimer);
+  resolveTimer = setTimeout(saveResolveCache, 800);
+  return best;
+}
+
 export async function searchArtists(q) {
   const d = await api('/search', { query: { q, type: 'artist', limit: 8 } });
   return (d?.artists?.items || []).filter(Boolean).map((a) => ({

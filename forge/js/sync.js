@@ -1,11 +1,11 @@
-// 設定（Last.fm / Claude の API キー）を端末間で受け渡す。
+// 設定（Last.fm / Claude / Gemini の API キー）を端末間で受け渡す。
 // 四辻 NEXT と同じサイトなので、四辻 NEXT の GitHub トークン（localStorage の ghTok）と同期用の非公開 Gist をそのまま使う。
 // Gist にファイル「playlist-forge-settings.json」を 1 つ足すだけで、四辻 NEXT のデータには触らない。
 import { store } from './util.js';
 
 const SYNC_FILE = 'yotsuji-next-sync.json'; // 四辻 NEXT の同期ファイル（この Gist を探す目印）
 const FILE = 'playlist-forge-settings.json';
-const KEYS = ['spm.lastfmKey', 'spm.claudeKey'];
+const KEYS = ['spm.lastfmKey', 'spm.claudeKey', 'spm.geminiKey'];
 
 const token = () => store.get('ghTok', '');
 export const canSync = () => !!token();

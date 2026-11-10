@@ -89,7 +89,7 @@
             <label for="theme">テーマ</label>
             <input id="theme" list="theme-list" placeholder="季節・行事・場面（例: ハロウィン、クリスマス、夏）" />
             <datalist id="theme-list"></datalist>
-            <p class="hint">曲名に含むかどうかではなく、その時期によく流れる曲・連想される曲を集めます（Last.fm のタグと Claude）。年代・国・サウンドの条件で絞り込めます。</p>
+            <p class="hint">曲名に含むかどうかではなく、その時期によく流れる曲・連想される曲を集めます（Deezer の公開プレイリスト・Last.fm のタグ・定番曲、AI のキーがあれば AI も）。年代・国・サウンドの条件で絞り込めます。</p>
           </div>
           <div class="field">
             <label for="keywords">キーワード</label>
@@ -238,10 +238,14 @@
           <input id="set-lastfm" autocomplete="off" />
         </label>
         <p class="hint">無料で取得できます：<a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener">last.fm/api/account/create</a></p>
-        <label>Claude API キー（文章での指定を高精度にする・任意）
+        <label>Gemini API キー（文章での指定とテーマの曲を AI で・任意・無料枠あり）
+          <input id="set-gemini" type="password" autocomplete="off" />
+        </label>
+        <p class="hint"><a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> で発行できます。Gemini の有料プラン（Google AI Pro など）とは別で、API には無料枠があります。</p>
+        <label>Claude API キー（任意・有料。Gemini のキーがあれば Gemini を使います）
           <input id="set-claude" type="password" autocomplete="off" />
         </label>
-        <p class="hint">未設定でも文章入力は使えます（簡易解析）。キーはこのブラウザ内にだけ保存されます。</p>
+        <p class="hint">AI のキーがなくても使えます（文章は簡易解析、テーマは Deezer・Last.fm・定番曲から）。キーはこのブラウザ内にだけ保存されます。</p>
         <div class="row end">
           <button value="cancel" class="btn btn-ghost">キャンセル</button>
           <button id="set-save" value="save" class="btn btn-primary">保存</button>

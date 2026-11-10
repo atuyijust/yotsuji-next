@@ -95,7 +95,8 @@ Spotify（人気度・レーベル・リリース・アーティストのジャ�
 - Forge は Client ID が分かっていて未ログインなら、開いたときに自動で Spotify ログインへ（タブごとに 1 回、sessionStorage `spm.autoLogin`）
 - Forge のアイコンは `forge/` の中に専用のもの（`icon.svg` が元。PNG は headless Chrome で書き出し、`icon-maskable-512.png`・`apple-touch-icon.png` は全面塗り）。四辻 NEXT のアイコンと見分けられるように（ユーザー指定）
 - Forge の「新しい版に更新」（`forge/js/update.js`、四辻 NEXT の checkUpdate と同じ考え方）: 開いたときのファイル群のハッシュと、公開中（`cache:'no-store'`）のハッシュを20秒後・表示中10分おき・画面復帰時に比べ、違えば `#btn-update` を出す。押すかタブが隠れたとき（曲を探している最中以外）に、条件と一覧を sessionStorage に保存し、キャッシュを `cache:'reload'` で入れ替えてから読み直す。新しい JS ファイルを足したら `FILES` にも足す
-- テーマの定番曲: `data.js` の THEMES に `classics`（ハロウィン・クリスマス）。Claude が使えない（クレジット切れなど）ときも定番曲が入る。Last.fm・Claude・定番曲のうち2つ以上で見つかった曲は +0.25
+- テーマの出どころ（`engine.js` の themeMode）: 組み込みの定番曲 `data.js` THEMES の `classics`（ハロウィン・クリスマス）／Deezer の公開プレイリスト（`sources.js` `deezerThemeTracks`、キー不要・JSONP。テーマの言葉で検索した最大20本で、2本以上に入っている曲。Spotify へは ISRC `resolveIsrc` で照合。Deezer の名前は日本語表記になるので、除外の判定は照合後の Spotify の名前で）／Last.fm のタグ／AI。2つ以上で見つかった曲は +0.25
+- AI は任意（ユーザーは Claude API に課金しない方針）: `nl.js` の `askJSON` が Gemini（`spm.geminiKey`、AI Studio の無料枠）を優先、なければ Claude。Gemini のモデルは `models` 一覧から Flash の最新版を自動で選ぶ（LS `spm.geminiModel`、7日、404 なら選び直し）。JSON は `responseJsonSchema`、受け付けなければ文章で形を伝える。AI が失敗しても文章は簡易ルール、テーマは AI 以外の出どころで続け、`aiErrorText` で分かる言葉にする。テーマで AI に頼むのは最大3回・1回100曲まで（トークン節約）
 
 ## やらないこと
 - 第三者APIキーのコード埋め込み

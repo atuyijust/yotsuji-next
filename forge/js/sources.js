@@ -309,3 +309,63 @@ export async function artistsByCountry(code, tag, limit = 20) {
   store.set(MB_CACHE_KEY, mbCache);
   return names;
 }
+
+// ---------------- Deezer（キー不要）：テーマの公開プレイリスト ----------------
+// Deezer の API はブラウザからの fetch を許していないので JSONP で呼ぶ（四辻 NEXT と同じ）
+const dzLimit = pLimit(4);
+function jsonp(url, timeout = 12000) {
+  return dzLimit(
+    () =>
+      new Promise((resolve, reject) => {
+        const cb = 'pfdz' + Math.random().toString(36).slice(2);
+        const s = document.createElement('script');
+        const done = () => {
+          clearTimeout(timer);
+          delete window[cb];
+          s.remove();
+        };
+        const timer = setTimeout(() => (done(), reject(new Error('Deezer が応答しません'))), timeout);
+        window[cb] = (d) => (done(), resolve(d));
+        s.onerror = () => (done(), reject(new Error('Deezer に接続できません')));
+        s.src = `${url}${url.includes('?') ? '&' : '?'}output=jsonp&callback=${cb}`;
+        document.head.appendChild(s);
+      }),
+  );
+}
+
+/**
+ * テーマの言葉で Deezer の公開プレイリストを探し、何本のプレイリストに入っているかで曲を並べる。
+ * 人が「ハロウィンのプレイリスト」に入れた曲＝その時期に実際によく流れる曲。
+ * 返り値: { tracks: [{title, artist, isrc, lists}], playlists }（lists が多い順）
+ */
+export async function deezerThemeTracks(queries, { maxLists = 20 } = {}) {
+  const seen = new Map();
+  for (const q of queries) {
+    const d = await jsonp(`https://api.deezer.com/search/playlist?q=${encodeURIComponent(q)}&limit=25`).catch(() => null);
+    for (const p of d?.data || []) {
+      // 曲が少なすぎる・多すぎる（全集のような）プレイリストは外す
+      if (p.nb_tracks < 10 || p.nb_tracks > 400 || seen.has(p.id)) continue;
+      seen.set(p.id, p);
+    }
+    if (seen.size >= maxLists) break;
+  }
+  const lists = [...seen.values()].slice(0, maxLists);
+  const count = new Map();
+  await Promise.all(
+    lists.map(async (p) => {
+      const d = await jsonp(`https://api.deezer.com/playlist/${p.id}/tracks?limit=100`).catch(() => null);
+      const inList = new Set();
+      for (const t of d?.data || []) {
+        const key = t.isrc || `${norm(t.artist?.name)}|${norm(t.title_short || t.title)}`;
+        if (inList.has(key)) continue;
+        inList.add(key);
+        const e = count.get(key) || { title: t.title_short || t.title, artist: t.artist?.name || '', isrc: t.isrc || '', lists: 0, rank: 0 };
+        e.lists++;
+        e.rank = Math.max(e.rank, t.rank || 0);
+        count.set(key, e);
+      }
+    }),
+  );
+  const tracks = [...count.values()].sort((a, b) => b.lists - a.lists || b.rank - a.rank);
+  return { tracks, playlists: lists.length };
+}

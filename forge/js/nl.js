@@ -1,10 +1,13 @@
-// 文章（フリーワード）→ 検索条件 への変換
-//  - Claude API キーがあれば Claude で解釈（高精度）
-//  - なければ簡易ルールで解釈
+// 文章（フリーワード）→ 検索条件 への変換、テーマの曲の提案
+//  - Gemini か Claude の API キーがあれば AI で解釈（高精度）。両方あれば Gemini（無料枠で使えるため）
+//  - なければ（または AI が失敗したら）簡易ルールで解釈
 import { FEATURE_KEYS, GENRES, COUNTRIES, MOODS, THEMES } from './data.js';
 import { store } from './util.js';
 
 export const getClaudeKey = () => store.get('spm.claudeKey', '');
+export const getGeminiKey = () => store.get('spm.geminiKey', '');
+// 使う AI の名前（キーがなければ空）
+export const aiName = () => (getGeminiKey() ? 'Gemini' : getClaudeKey() ? 'Claude' : '');
 
 const SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.1.0/+esm';
 const MODEL = 'claude-opus-5-5';
@@ -77,30 +80,103 @@ const SYSTEM = `あなたは Spotify プレイリスト作成アプリの条件�
 
 let sdkPromise = null;
 
-async function viaClaude(text, apiKey) {
+// ---------------- AI への問い合わせ（JSON で受け取る） ----------------
+async function claudeJSON({ system, user, schema, maxTokens }) {
   sdkPromise ??= import(SDK_URL);
   const { default: Anthropic } = await sdkPromise;
-  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
+  const client = new Anthropic({ apiKey: getClaudeKey(), dangerouslyAllowBrowser: true });
   const res = await client.beta.messages.create({
     model: MODEL,
-    max_tokens: 4000,
+    max_tokens: maxTokens,
     betas: ['server-side-fallback-2026-07-01'],
     fallbacks: 'default',
-    output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
-    system: SYSTEM,
-    messages: [{ role: 'user', content: text }],
+    output_config: { effort: 'low', format: { type: 'json_schema', schema } },
+    system,
+    messages: [{ role: 'user', content: user }],
   });
-  if (res.stop_reason === 'refusal') throw new Error('Claude がこの文章の解釈を断りました。言い回しを変えてお試しください');
+  if (res.stop_reason === 'refusal') throw new Error('Claude が回答を断りました。言い回しを変えてお試しください');
   const block = res.content.find((b) => b.type === 'text');
   if (!block) throw new Error('Claude から結果を受け取れませんでした');
-  const out = JSON.parse(block.text);
+  return JSON.parse(block.text);
+}
+
+// Gemini：モデル名は時期によって変わるので、使えるモデルの一覧から Flash の最新版を選ぶ（7 日ごとに選び直す）
+const GEMINI = 'https://generativelanguage.googleapis.com/v1beta';
+async function geminiFetch(path, body) {
+  const res = await fetch(`${GEMINI}/${path}`, {
+    method: body ? 'POST' : 'GET',
+    headers: { 'x-goog-api-key': getGeminiKey(), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const e = new Error(`Gemini ${res.status}: ${d.error?.message || res.statusText}`);
+    e.status = res.status;
+    throw e;
+  }
+  return d;
+}
+
+async function geminiModel(refresh = false) {
+  const saved = store.get('spm.geminiModel');
+  if (!refresh && saved && Date.now() - saved.at < 7 * 864e5) return saved.name;
+  const d = await geminiFetch('models?pageSize=200');
+  const ok = (d.models || []).filter((m) => (m.supportedGenerationMethods || []).includes('generateContent') && /gemini/.test(m.name));
+  const ver = (n) => Number((n.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
+  const bad = /image|tts|audio|live|embed|vision|thinking|robotics|computer|learnlm|gemma/;
+  const pick = (re) => ok.filter((m) => re.test(m.name) && !bad.test(m.name)).sort((a, b) => ver(b.name) - ver(a.name))[0];
+  // 安定版の Flash → プレビュー版も含めた Flash → Flash-Lite → なんでも
+  const m = pick(/gemini-[\d.]+-flash$/) || pick(/gemini-[\d.]+-flash(-preview.*|-latest)?$/) || pick(/flash-lite/) || pick(/flash/) || ok[0];
+  if (!m) throw new Error('この Gemini API キーで使えるモデルが見つかりません');
+  store.set('spm.geminiModel', { name: m.name, at: Date.now() });
+  return m.name;
+}
+
+async function geminiJSON({ system, user, schema, maxTokens }, retry = 0) {
+  const model = await geminiModel(retry > 0);
+  const body = {
+    systemInstruction: { parts: [{ text: system }] },
+    contents: [{ role: 'user', parts: [{ text: user }] }],
+    generationConfig: { responseMimeType: 'application/json', maxOutputTokens: maxTokens, temperature: 0.4 },
+  };
+  // JSON Schema で形を指定（古いモデルで受け付けなければ、形は文章で伝える）
+  if (retry < 2) body.generationConfig.responseJsonSchema = schema;
+  else body.contents[0].parts[0].text += `\n\n次の JSON Schema に従う JSON だけを返してください:\n${JSON.stringify(schema)}`;
+  let d;
+  try {
+    d = await geminiFetch(`${model}:generateContent`, body);
+  } catch (e) {
+    if (e.status === 404 && retry === 0) return geminiJSON({ system, user, schema, maxTokens }, 1);
+    if (e.status === 400 && retry < 2 && /schema|json/i.test(e.message)) return geminiJSON({ system, user, schema, maxTokens }, 2);
+    throw e;
+  }
+  const cand = d.candidates?.[0];
+  if (!cand) throw new Error(d.promptFeedback?.blockReason ? 'Gemini が回答を断りました。言い回しを変えてお試しください' : 'Gemini から結果を受け取れませんでした');
+  const text = (cand.content?.parts || []).map((p) => p.text || '').join('').trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
+  return JSON.parse(text);
+}
+
+const askJSON = (opt) => (getGeminiKey() ? geminiJSON(opt) : claudeJSON(opt));
+
+// AI のエラーを分かる言葉に
+export function aiErrorText(msg, name = aiName()) {
+  msg = String(msg || '');
+  if (/credit balance/i.test(msg)) return `${name} の API のクレジット残高が足りないため、${name} を使えませんでした（AI なしでも、定番曲・Deezer・Last.fm から選んでいます）。`;
+  if (/API key not valid|API_KEY_INVALID|authentication|invalid x-api-key|\b401\b|\b403\b/i.test(msg)) return `${name} の API キーが正しくありません。「設定」でキーを確認してください。`;
+  if (/quota|RESOURCE_EXHAUSTED|rate.?limit|\b429\b/i.test(msg)) return `${name} の無料枠の回数を使い切ったか、短い間に使いすぎました。しばらく（翌日まで）待つと、また使えます。`;
+  if (/overloaded|\b529\b|\b503\b|UNAVAILABLE/i.test(msg)) return `${name} が混み合っていて使えませんでした。少し待ってから「作り直す」を押してください。`;
+  return `${name} への問い合わせに失敗しました：${msg}`;
+}
+
+async function viaAI(text) {
+  const out = await askJSON({ system: SYSTEM, user: text, schema: SCHEMA, maxTokens: 4000 });
   const features = {};
   for (const f of out.features || []) features[f.key] = [Math.min(f.min, f.max), Math.max(f.min, f.max)];
   const seedTracks = (out.seedTracks || []).map((t) => ({ name: t.title, artist: t.artist }));
-  return { ...out, seedTracks, features, via: 'claude' };
+  return { ...out, seedTracks, features, via: getGeminiKey() ? 'gemini' : 'claude' };
 }
 
-// ---------------- テーマに合う曲を Claude に挙げてもらう ----------------
+// ---------------- テーマに合う曲を AI に挙げてもらう ----------------
 // 返すのは {title, artist} の配列。実在するかは呼び出し側で Spotify に照合して確かめる
 const THEME_SCHEMA = {
   type: 'object',
@@ -120,11 +196,7 @@ const THEME_SCHEMA = {
 };
 
 export async function suggestThemeTracks({ theme, genres = [], yearFrom, yearTo, countries = [], excludeCountries = [], sound = [], avoid = [], n = 80 }) {
-  const apiKey = getClaudeKey();
-  if (!apiKey) return [];
-  sdkPromise ??= import(SDK_URL);
-  const { default: Anthropic } = await sdkPromise;
-  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
+  if (!aiName()) return [];
   const cond = [
     genres.length ? `ジャンル: ${genres.join(', ')}` : '',
     yearFrom || yearTo ? `リリース年: ${yearFrom || ''}〜${yearTo || ''}` : '',
@@ -133,22 +205,17 @@ export async function suggestThemeTracks({ theme, genres = [], yearFrom, yearTo,
     sound.length ? `音の条件（できるだけ満たす曲を）: ${sound.join('、')}` : '',
   ].filter(Boolean);
   const avoidText = avoid.length ? `\n次の曲はもう挙げてもらったので、これ以外で:\n${avoid.slice(-250).join('\n')}` : '';
-  const res = await client.beta.messages.create({
-    model: MODEL,
-    max_tokens: 8000,
-    betas: ['server-side-fallback-2026-07-01'],
-    fallbacks: 'default',
-    output_config: { effort: 'low', format: { type: 'json_schema', schema: THEME_SCHEMA } },
+  const out = await askJSON({
+    maxTokens: 8000,
     system:
       'あなたは音楽に詳しい選曲家です。指定されたテーマ（季節・行事・場面）の時期によく流れる曲や、そのテーマを強く連想させる曲を挙げてください。' +
       '曲名にテーマの単語が入っているかどうかは問いません。実在する曲だけを、Spotify で検索できる正式な曲名とアーティスト名で書いてください。' +
       'パーティーやお店、ラジオ、定番プレイリストでその時期に実際によく流れる、誰もが知っている曲から順に並べてください（例: ハロウィンなら Thriller, Monster Mash, Ghostbusters, This Is Halloween のような曲が先）。' +
       '雰囲気が暗いだけ・タイトルが似ているだけの曲は後回しにしてください。同じアーティストは 2 曲までにしてください。',
-    messages: [{ role: 'user', content: `テーマ: ${theme}\n${cond.join('\n')}\n${n} 曲挙げてください。${avoidText}` }],
+    user: `テーマ: ${theme}\n${cond.join('\n')}\n${n} 曲挙げてください。${avoidText}`,
+    schema: THEME_SCHEMA,
   });
-  const block = res.content.find((b) => b.type === 'text');
-  if (!block) return [];
-  return (JSON.parse(block.text).tracks || []).filter((t) => t.title && t.artist);
+  return (out.tracks || []).filter((t) => t.title && t.artist);
 }
 
 // ---------------- 簡易ルール ----------------
@@ -288,7 +355,12 @@ function viaRules(text) {
 }
 
 export async function parseRequest(text) {
-  const key = getClaudeKey();
-  if (key) return viaClaude(text, key);
-  return viaRules(text);
+  if (!aiName()) return viaRules(text);
+  try {
+    return await viaAI(text);
+  } catch (e) {
+    // AI が使えなくても（無料枠切れなど）簡易ルールで続ける
+    console.warn('[playlist-forge] AI parse', e);
+    return { ...viaRules(text), aiError: aiErrorText(e?.message || e) };
+  }
 }

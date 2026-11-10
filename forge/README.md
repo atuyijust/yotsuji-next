@@ -19,7 +19,12 @@
 
 「似せたい曲」を指定すると、その曲と一緒によく聴かれている曲（Last.fm）を中心に集め、その曲の BPM やエネルギーに近い順に並べます。キーワード欄に「曲名 アーティスト名」を入れた場合も、自動で「似せたい曲」に置き換えます。
 
-### 3. Claude API キー（任意）
+### 3. Gemini / Claude の API キー（任意）
+Gemini の API キー（[Google AI Studio](https://aistudio.google.com/apikey) で発行、無料枠あり）があれば、文章の解釈とテーマの曲探しに Gemini を使います。Gemini の有料プラン（Google AI Pro など）とは別物です。Claude の API キーも使えますが有料です。両方あれば Gemini を使います。
+
+テーマ（ハロウィンなど）は、AI のキーがなくても Deezer の公開プレイリスト（キー不要）・Last.fm のタグ・組み込みの定番曲から集めます。
+
+#### Claude について
 文章での指定を Claude（`claude-opus-5-5`）で解釈し、精度を上げます。[Claude Console](https://platform.claude.com/) で発行できます。
 キーがなくても、簡易的なルールで文章を解析できます。
 

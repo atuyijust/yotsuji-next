@@ -2,7 +2,7 @@
 import * as sp from './spotify.js';
 import * as src from './sources.js';
 import { FEATURES, themeTags, themeOf } from './data.js';
-import { suggestThemeTracks, getClaudeKey } from './nl.js';
+import { suggestThemeTracks, aiName } from './nl.js';
 import { norm, baseTitle, shuffle, pLimit } from './util.js';
 
 const FEAT_DEF = Object.fromEntries(FEATURES.map((f) => [f.key, f]));
@@ -59,8 +59,9 @@ export async function generate(c, onProgress = () => {}) {
   const seedTrackSet = new Set(seedTracks.map((t) => t.id));
   const seedTrackKeys = new Set(seedTracks.map((t) => `${norm(t.artist)}|${baseTitle(t.name)}`));
   const hasSimilarSeeds = ((c.seedArtists || []).length > 0 && c.seedMode !== 'only') || seedTracks.length > 0;
-  let claudeUsed = false;
-  let claudeError = '';
+  let aiUsed = '';
+  let aiError = '';
+  let dzLists = 0;
   // テーマ（例: halloween）。指定したら、テーマに合う曲だけから選ぶ（年代・国・サウンドは絞り込みとして効く）
   const tTags = themeTags(c.theme);
   const themeMode = tTags.length > 0;
@@ -72,7 +73,7 @@ export async function generate(c, onProgress = () => {}) {
     return kwWords.every((w) => hay.includes(w));
   };
 
-  // themeFrom: テーマの根拠（'lf' = Last.fm のタグ、'ai' = Claude）。両方で見つかった曲ほど確か
+  // themeFrom: テーマの根拠（'lf' = Last.fm のタグ、'ai' = Gemini・Claude、'cl' = 組み込みの定番曲、'dz' = Deezer の公開プレイリスト）。2 つ以上で見つかった曲ほど確か
   const add = (t, source, weight = 0, themeFrom = '') => {
     if (!t?.id) return;
     let e = pool.get(t.id);
@@ -86,6 +87,7 @@ export async function generate(c, onProgress = () => {}) {
     if (themeFrom === 'lf') e.themeLf = Math.max(e.themeLf || 0, weight);
     if (themeFrom === 'ai') e.themeAi = Math.max(e.themeAi || 0, weight);
     if (themeFrom === 'cl') e.themeCl = Math.max(e.themeCl || 0, weight);
+    if (themeFrom === 'dz') e.themeDz = Math.max(e.themeDz || 0, weight);
   };
 
   const searchPages = async (query, n, filterFn) => {
@@ -409,7 +411,7 @@ export async function generate(c, onProgress = () => {}) {
   };
   for (const [tag, w] of tagList) expanders.push(tagExpander(tag, w));
 
-  // テーマ：Last.fm でそのテーマのタグが付いた曲（聴いた人が「ハロウィンの曲」と認めている曲）＋ Claude が挙げた定番曲
+  // テーマ：Last.fm でそのテーマのタグが付いた曲（聴いた人が「ハロウィンの曲」と認めている曲）＋ Deezer の公開プレイリスト ＋ 組み込みの定番曲 ＋ AI（Gemini・Claude）が挙げた曲
   if (themeMode) {
     // 先頭 2 つ（例: halloween, halloween songs）がテーマそのもの。spooky・horror などは雰囲気が近いだけなので弱く
     if (useLastfm) tTags.forEach((tag, i) => expanders.push(tagExpander(tag, i < 2 ? 0.45 : 0.15, 'theme')));
@@ -432,12 +434,37 @@ export async function generate(c, onProgress = () => {}) {
       };
       expanders.unshift(ex);
     }
-    if (!useLastfm && !getClaudeKey() && !classics.length) {
-      throw new Error('テーマで探すには、Last.fm の API キーか Claude の API キーが必要です。「設定」で入力してください');
+    // Deezer の公開プレイリスト（キー不要）。何本のプレイリストに入っているかが多い曲ほど強く
+    {
+      const th = themeOf(c.theme);
+      const queries = [...new Set([c.theme, th?.label, ...(th ? tTags.slice(0, 2) : [])].filter(Boolean).map((x) => String(x).trim().toLowerCase()))];
+      let ranked = null;
+      const ex = {
+        done: false,
+        async next() {
+          if (!ranked) {
+            log(`「${c.theme}」の公開プレイリストを Deezer で探しています…`, null);
+            const r = await src.deezerThemeTracks(queries).catch((e) => (console.warn('[playlist-forge] deezer', e), { tracks: [], playlists: 0 }));
+            dzLists = r.playlists;
+            // 1 本にしか入っていない曲は、プレイリストが少ないときだけ使う（その人の好みが混ざるため）
+            ranked = r.tracks.filter((t) => t.lists >= 2 || r.playlists <= 3).slice(0, 300);
+          }
+          const batch = ranked.splice(0, 60);
+          if (!ranked.length) ex.done = true;
+          await Promise.all(
+            batch.map(async (t) => {
+              const tr = (t.isrc && (await sp.resolveIsrc(t.isrc, yf).catch(() => null))) || (await sp.resolveTrack(t.artist, t.title, yf).catch(() => null));
+              if (!tr || tr.artists.some((a) => excludeArtistNames.has(norm(a.name))) || scriptExcluded(`${tr.artists.map((a) => a.name).join(' ')} ${tr.name}`)) return;
+              add(tr, 'theme', 0.3 + 0.08 * Math.min(t.lists, 4), 'dz');
+            }),
+          );
+        },
+      };
+      expanders.push(ex);
     }
-    claudeUsed = !!getClaudeKey();
-    // Claude に定番曲を挙げてもらう。足りなければ「挙げ済み以外で」と何度か頼む（音の条件も伝えて、絞り込みで外れにくくする）
-    if (getClaudeKey()) {
+    aiUsed = aiName();
+    // AI（Gemini か Claude）に定番曲を挙げてもらう。足りなければ「挙げ済み以外で」と何度か頼む（音の条件も伝えて、絞り込みで外れにくくする）
+    if (aiUsed) {
       const asked = new Set();
       const soundText = () => {
         const sound = active.map(([k, [lo, hi]]) => {
@@ -453,7 +480,7 @@ export async function generate(c, onProgress = () => {}) {
         done: false,
         async next() {
           rounds++;
-          log(`「${c.theme}」に合う曲を Claude に挙げてもらっています…（${rounds} 回目）`, null);
+          log(`「${c.theme}」に合う曲を ${aiUsed} に挙げてもらっています…（${rounds} 回目）`, null);
           const picks = await suggestThemeTracks({
             theme: c.theme,
             genres: c.genres || [],
@@ -463,16 +490,16 @@ export async function generate(c, onProgress = () => {}) {
             excludeCountries: c.excludeCountries || [],
             sound: soundText(),
             avoid: [...asked],
-            n: Math.min(150, Math.max(60, Math.ceil(size * 0.8))),
+            n: Math.min(100, Math.max(50, Math.ceil(size * 0.5))),
           }).catch((e) => {
             console.warn('[playlist-forge] theme picks', e);
-            claudeError = e?.message || String(e);
+            aiError = e?.message || String(e);
             ex.done = true;
             return [];
           });
           const fresh = picks.filter((t) => !asked.has(`${t.title} / ${t.artist}`));
           fresh.forEach((t) => asked.add(`${t.title} / ${t.artist}`));
-          if (fresh.length < 10 || rounds >= 6) ex.done = true;
+          if (fresh.length < 10 || rounds >= 3) ex.done = true;
           await Promise.all(
             fresh.map(async (t, i) => {
               if (excludeArtistNames.has(norm(t.artist)) || scriptExcluded(`${t.artist} ${t.title}`)) return;
@@ -785,7 +812,7 @@ export async function generate(c, onProgress = () => {}) {
     // 人気度（メジャーさ）。似たアーティスト探しでは控えめ、ジャンル・年代指定では強め
     // テーマでは「その時期に聴かれているか」を優先し、人気度は控えめに
     const popWeight = activeKeys.has('popularity') ? 0.1 : themeMode ? 0.3 : hasSimilarSeeds ? 0.2 : 0.45;
-    const themeBonus = themeMode && !!t.themeLf + !!t.themeAi + !!t.themeCl >= 2 ? 0.25 : 0;
+    const themeBonus = themeMode && !!t.themeLf + !!t.themeAi + !!t.themeCl + !!t.themeDz >= 2 ? 0.25 : 0;
     const popBonus = t.popularity != null ? (t.popularity / 100) * popWeight : 0;
     // 国を除外する指定で国が分からなかった曲は、分かっている曲より後ろに
     const unknownPenalty = exc.size && t.countryUnknown ? 0.12 : 0;
@@ -867,12 +894,14 @@ export async function generate(c, onProgress = () => {}) {
       drops,
       theme: themeMode
         ? {
-            claudeUsed,
-            claudeError,
+            aiUsed,
+            aiError,
+            dzLists,
             fromClassics: picked.filter((t) => t.themeCl).length,
-            fromLastfm: picked.filter((t) => t.themeLf && !t.themeAi).length,
-            fromClaude: picked.filter((t) => t.themeAi && !t.themeLf).length,
-            fromBoth: picked.filter((t) => t.themeAi && t.themeLf).length,
+            fromDeezer: picked.filter((t) => t.themeDz).length,
+            fromLastfm: picked.filter((t) => t.themeLf).length,
+            fromAi: picked.filter((t) => t.themeAi).length,
+            multi: picked.filter((t) => !!t.themeLf + !!t.themeAi + !!t.themeCl + !!t.themeDz >= 2).length,
             soundActive: active.length > 0,
           }
         : null,

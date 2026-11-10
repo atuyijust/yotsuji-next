@@ -1,6 +1,6 @@
 import * as sp from './spotify.js';
 import { generate, orderTracks } from './engine.js';
-import { parseRequest, getClaudeKey } from './nl.js';
+import { parseRequest, aiName, aiErrorText } from './nl.js';
 import { FEATURES, GENRES, COUNTRIES, COUNTRY_NAME, MOODS, ORDERS, THEMES, themeOf } from './data.js';
 import { store, esc, norm } from './util.js';
 import * as keySync from './sync.js';
@@ -481,9 +481,8 @@ function renderTracks() {
   if (s.theme) {
     const th = s.theme;
     notes.push(
-      `テーマの曲の出どころ：${th.fromClassics ? `定番曲リスト ${th.fromClassics} 曲（重複あり）、` : ''}Last.fm のタグ ${th.fromLastfm} 曲、Claude ${th.fromClaude} 曲、両方 ${th.fromBoth} 曲。` +
-        (!th.claudeUsed ? '\nClaude の API キーがこのページに設定されていないため、Last.fm のタグだけで選んでいます（Last.fm のタグは洋楽のマニアックな曲に偏りがちです）。「設定」でキーを入れると、誰もが知っている定番曲が増えます。' : '') +
-        (th.claudeError ? '\n' + claudeErrorText(th.claudeError) : '') +
+      `テーマの曲の出どころ（重複あり）：${th.fromClassics ? `定番曲リスト ${th.fromClassics} 曲、` : ''}Deezer の公開プレイリスト ${th.fromDeezer} 曲（${th.dzLists} 本から）、Last.fm のタグ ${th.fromLastfm} 曲${th.aiUsed ? `、${th.aiUsed} ${th.fromAi} 曲` : ''}。2 つ以上で見つかった曲 ${th.multi} 曲を優先しています。` +
+        (th.aiError ? '\n' + aiErrorText(th.aiError, th.aiUsed) : '') +
         (th.soundActive ? '\nBPM などのサウンド条件が付いています。定番曲がこの条件で外れていることがあるので、テーマで探すときは外すのがおすすめです。' : ''),
     );
   }
@@ -547,14 +546,6 @@ const CAMELOT_MIN = [5, 12, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10];
 function camelot(key, mode) {
   if (key == null || key < 0 || key > 11 || (mode !== 0 && mode !== 1)) return '';
   return mode === 1 ? `${CAMELOT_MAJ[key]}B` : `${CAMELOT_MIN[key]}A`;
-}
-
-// Claude API のエラーを分かる言葉に
-function claudeErrorText(msg) {
-  if (/credit balance/i.test(msg)) return 'Claude の API のクレジット残高が足りないため、Claude を使えませんでした。Claude Console（platform.claude.com）の「Plans & Billing」でクレジットを購入すると、定番曲がさらに増えます。';
-  if (/authentication|invalid x-api-key|401/i.test(msg)) return 'Claude の API キーが正しくありません。「設定」でキーを確認してください。';
-  if (/rate.?limit|429|overloaded|529/i.test(msg)) return 'Claude が混み合っていて使えませんでした。少し待ってから「作り直す」を押してください。';
-  return `Claude への問い合わせに失敗しました：${msg}`;
 }
 
 // Spotify アプリで再生（動いているデバイスがなければ開いている Spotify を探す）
@@ -703,7 +694,7 @@ async function runNL() {
   if (!text) return;
   const btn = $('#btn-nl');
   btn.disabled = true;
-  btn.textContent = getClaudeKey() ? 'Claude が解釈中…' : '解析中…';
+  btn.textContent = aiName() ? `${aiName()} が解釈中…` : '解析中…';
   showError(null);
   try {
     const r = await parseRequest(text);
@@ -731,7 +722,7 @@ async function runNL() {
       delete $('#pl-name').dataset.edited;
     }
     const note = $('#nl-note');
-    note.textContent = `${r.explanation}　→ 下の条件に反映しました。必要なら調整して「曲を探す」を押してください。`;
+    note.textContent = `${r.aiError ? r.aiError + '（簡易ルールで解釈しました）\n' : ''}${r.explanation}　→ 下の条件に反映しました。必要なら調整して「曲を探す」を押してください。`;
     note.hidden = false;
     if (sp.isLoggedIn()) resolveSeedNames();
   } catch (e) {
@@ -747,6 +738,7 @@ function openSettings() {
   $('#set-client').value = sp.getClientId();
   $('#set-lastfm').value = store.get('spm.lastfmKey', '');
   $('#set-claude').value = store.get('spm.claudeKey', '');
+  $('#set-gemini').value = store.get('spm.geminiKey', '');
   $('#redirect-uri').textContent = sp.redirectUri();
   $('#settings').showModal();
 }
@@ -758,6 +750,9 @@ function setupSettings() {
     store.set('spm.clientId', $('#set-client').value.trim());
     store.set('spm.lastfmKey', $('#set-lastfm').value.trim());
     store.set('spm.claudeKey', $('#set-claude').value.trim());
+    const gk = $('#set-gemini').value.trim();
+    if (gk !== store.get('spm.geminiKey', '')) store.del('spm.geminiModel');
+    store.set('spm.geminiKey', gk);
     if (keySync.canSync()) {
       keySync
         .pushKeys()
@@ -964,8 +959,8 @@ async function syncKeysOnOpen() {
     const n = await keySync.pullKeys();
     if (n) toast('ほかの端末の設定（API キー）を受け取りました');
     // この端末にしかないキーがあれば共有しておく（送った内容が変わったときだけ）
-    const sig = [store.get('spm.lastfmKey', ''), store.get('spm.claudeKey', '')].join('|');
-    if (sig !== '|' && store.get('spm.keysSent', '') !== sig) {
+    const sig = [store.get('spm.lastfmKey', ''), store.get('spm.claudeKey', ''), store.get('spm.geminiKey', '')].join('|');
+    if (sig !== '||' && store.get('spm.keysSent', '') !== sig) {
       if (await keySync.pushKeys()) store.set('spm.keysSent', sig);
     }
   } catch (e) {
