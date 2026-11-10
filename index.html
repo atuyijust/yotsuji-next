@@ -102,8 +102,8 @@
   .cand .chip.tag{cursor:pointer}
   .stars{display:inline-flex;gap:1px} .stars .st{background:none;border:0;padding:0 2px;font-size:18px;line-height:1;color:var(--dim);opacity:.45;cursor:pointer}
   .stars .st.on{color:#f5c542;opacity:1} .stars .st:hover{transform:scale(1.15)}
-  .rateRow{display:flex;align-items:center;gap:8px;margin:4px 0} .rt{color:#f5c542;font-size:11px;letter-spacing:-1px;margin-left:4px}
-  @media (max-width:760px){ .stars .st{font-size:24px;padding:0 4px} .rateRow .kh{display:none} }
+  .rateRow{display:flex;align-items:center;gap:8px;margin:4px 0} .cstars{margin-left:6px;vertical-align:-1px} .cstars .st{font-size:13px;padding:0 1px}
+  @media (max-width:760px){ .stars .st{font-size:24px;padding:0 4px} .cstars .st{font-size:18px;padding:0 3px} .rateRow .kh{display:none} }
   .tagPre{margin-top:6px;font-size:12px} .tagPre summary{cursor:pointer;color:var(--dim)} .tagPre .tpg{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-top:5px}
   .tagPre .tpg>.muted{width:44px;flex:none} .tagPre .chip{cursor:pointer}
   .tags .chip{font-size:12px;padding:1px 8px}
@@ -864,7 +864,7 @@ function renderCands(keepSel){
   const max=top[0].sc, lm=labelMap();
   const rows = top.map((c,i)=>{ const t=S.tracks[c.id]; const m=S.meta[c.id]||{};
     return `<div class="cand${i===sel?" sel":""}" data-i="${i}" data-id="${c.id}"><span class="sc" title="全部の条件が揃ったときを100とした点">${list.weak?"—":c.pct}</span><img src="${esc(t.img)}" alt="" loading="lazy">
-      <div><div class="nm">${esc(t.name)}${(()=>{ const gl=genreList(c.id,lm); return (gl.length?gl.slice(0,3).map(x=>genrePill(x)).join(""):`<span class="gp none" title="ジャンル不明">？</span>`)+(c.gst?`<span class="gj ${c.gst[0]}"${c.gst[2]?` title="${esc(c.gst[2])}"`:""}>${c.gst[1]}</span>`:""); })()}</div><div class="muted">${esc(arts(t))}${ccSpan(c.id,c.ccv)}${starsView(c.id)}</div>${subLine(c.id,lm,c.yv)}<div class="chips">${c.chips.map(([k,x])=>`<span class="chip ${k}">${esc(x)}</span>`).join("")}</div></div>
+      <div><div class="nm">${esc(t.name)}${(()=>{ const gl=genreList(c.id,lm); return (gl.length?gl.slice(0,3).map(x=>genrePill(x)).join(""):`<span class="gp none" title="ジャンル不明">？</span>`)+(c.gst?`<span class="gj ${c.gst[0]}"${c.gst[2]?` title="${esc(c.gst[2])}"`:""}>${c.gst[1]}</span>`:""); })()}</div><div class="muted">${esc(arts(t))}${ccSpan(c.id,c.ccv)}<span class="cstars">${starsEdit(c.id,"data-crate")}</span></div>${subLine(c.id,lm,c.yv)}<div class="chips">${c.chips.map(([k,x])=>`<span class="chip ${k}">${esc(x)}</span>`).join("")}</div></div>
       <span class="meta">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="meta" style="color:var(--accent2)">${m.key||"—"}</span>
       <span class="acts"><button class="sm" data-tagbtn="${c.id}" title="この曲にタグ・評価を付ける">＃</button><button class="sm" data-c="${c.id}" title="曲名をコピー（rekordboxの検索に貼り付け）">⎘</button><button class="sm" data-q="${c.id}">キュー</button><button class="sm" data-p="${c.id}">再生</button><button class="sm" data-n="${c.id}">Nowへ</button></span></div>`; }).join("");
   let html=(list.weak?`<div class="empty" style="padding:8px 0">今の曲の手がかり（BPM・キー・プレイリスト・音の特徴）が少ないので、参考として並べています。BPM／キーを入れるか、この曲を含むプレイリストを読み込むと精度が上がります。</div>`:"")+rows;
@@ -879,7 +879,7 @@ const rateOf=id=>S.rate[id]?.r||0;
 function setRate(id,r){ r=Math.max(0,Math.min(5,r|0)); if(r && r===rateOf(id)) r=0; S.rate[id]={r,at:Date.now()}; DB.set("rate",S.rate);
   renderDeck(true); renderCands(true); if(tagPopId===id) renderTagPop(); autoSync(); }
 const starsEdit=(id,attr)=>{ const r=rateOf(id); return `<span class="stars" title="評価（同じ星をもう一度押すと外す）">${[1,2,3,4,5].map(n=>`<button class="st${n<=r?" on":""}" ${attr}="${n}" aria-label="星${n}">★</button>`).join("")}</span>`; };
-const starsView=id=>{ const r=rateOf(id); return r?` <span class="rt" title="評価 ${r}">${"★".repeat(r)}</span>`:""; };
+
 // 最初から用意しておく定番タグ（DJがフォルダ／マイタグ分けに使う区分: 時間帯・役割・音の要素・ムード・版）
 const TAG_PRESET=[["時間帯",["Opener","Warm Up","Build Up","Peak Time","Closing","After Hours"]],
   ["役割",["Banger","Anthem","Tool","Transition","Cool Down","Singalong"]],
@@ -1645,6 +1645,7 @@ function openLyrics(id){ const t=S.tracks[id]; if(!t) return; const nm=t.name.re
 document.addEventListener("click",e=>{
   if(e.target.closest("[data-undo]")){ undoNow(); return; }
   const ly=e.target.closest("[data-lyr]"); if(ly){ openLyrics(ly.dataset.lyr); return; }
+  const cr=e.target.closest("[data-crate]"); if(cr){ const id=cr.closest(".cand")?.dataset.id; if(id) setRate(id,+cr.dataset.crate); return; }
   const tb=e.target.closest("[data-tagbtn]"), tc=!tb && e.target.closest(".cand .chip.tag");
   if(tb||tc){ const id=tb?tb.dataset.tagbtn:tc.closest(".cand")?.querySelector("[data-tagbtn]")?.dataset.tagbtn;
     if(id){ if(tagPopId===id && tb) closeTagPop(); else openTagPop(id,tb||tc); } return; }
