@@ -1,7 +1,7 @@
 // 候補収集 → 特徴量取得 → 絞り込み → スコアリング → 選曲
 import * as sp from './spotify.js';
 import * as src from './sources.js';
-import { FEATURES, themeTags } from './data.js';
+import { FEATURES, themeTags, themeOf } from './data.js';
 import { suggestThemeTracks, getClaudeKey } from './nl.js';
 import { norm, baseTitle, shuffle, pLimit } from './util.js';
 
@@ -85,6 +85,7 @@ export async function generate(c, onProgress = () => {}) {
     e.sources.set(source, Math.max(e.sources.get(source) || 0, weight));
     if (themeFrom === 'lf') e.themeLf = Math.max(e.themeLf || 0, weight);
     if (themeFrom === 'ai') e.themeAi = Math.max(e.themeAi || 0, weight);
+    if (themeFrom === 'cl') e.themeCl = Math.max(e.themeCl || 0, weight);
   };
 
   const searchPages = async (query, n, filterFn) => {
@@ -412,7 +413,26 @@ export async function generate(c, onProgress = () => {}) {
   if (themeMode) {
     // 先頭 2 つ（例: halloween, halloween songs）がテーマそのもの。spooky・horror などは雰囲気が近いだけなので弱く
     if (useLastfm) tTags.forEach((tag, i) => expanders.push(tagExpander(tag, i < 2 ? 0.45 : 0.15, 'theme')));
-    if (!useLastfm && !getClaudeKey()) {
+    // 組み込みの定番曲（ハロウィン・クリスマス）。いちばん確かなので最初に、強めに入れる
+    const classics = themeOf(c.theme)?.classics || [];
+    if (classics.length) {
+      const ex = {
+        done: false,
+        async next() {
+          ex.done = true;
+          log(`「${c.theme}」の定番曲を Spotify で探しています…`, null);
+          await Promise.all(
+            classics.map(async ([title, artist], i) => {
+              if (excludeArtistNames.has(norm(artist)) || scriptExcluded(`${artist} ${title}`)) return;
+              const tr = await sp.resolveTrack(artist, title, yf).catch(() => null);
+              if (tr) add(tr, 'theme', 0.6 - i / 1000, 'cl');
+            }),
+          );
+        },
+      };
+      expanders.unshift(ex);
+    }
+    if (!useLastfm && !getClaudeKey() && !classics.length) {
       throw new Error('テーマで探すには、Last.fm の API キーか Claude の API キーが必要です。「設定」で入力してください');
     }
     claudeUsed = !!getClaudeKey();
@@ -765,7 +785,7 @@ export async function generate(c, onProgress = () => {}) {
     // 人気度（メジャーさ）。似たアーティスト探しでは控えめ、ジャンル・年代指定では強め
     // テーマでは「その時期に聴かれているか」を優先し、人気度は控えめに
     const popWeight = activeKeys.has('popularity') ? 0.1 : themeMode ? 0.3 : hasSimilarSeeds ? 0.2 : 0.45;
-    const themeBonus = themeMode && t.themeLf && t.themeAi ? 0.25 : 0;
+    const themeBonus = themeMode && !!t.themeLf + !!t.themeAi + !!t.themeCl >= 2 ? 0.25 : 0;
     const popBonus = t.popularity != null ? (t.popularity / 100) * popWeight : 0;
     // 国を除外する指定で国が分からなかった曲は、分かっている曲より後ろに
     const unknownPenalty = exc.size && t.countryUnknown ? 0.12 : 0;
@@ -849,6 +869,7 @@ export async function generate(c, onProgress = () => {}) {
         ? {
             claudeUsed,
             claudeError,
+            fromClassics: picked.filter((t) => t.themeCl).length,
             fromLastfm: picked.filter((t) => t.themeLf && !t.themeAi).length,
             fromClaude: picked.filter((t) => t.themeAi && !t.themeLf).length,
             fromBoth: picked.filter((t) => t.themeAi && t.themeLf).length,

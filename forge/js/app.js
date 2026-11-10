@@ -4,6 +4,7 @@ import { parseRequest, getClaudeKey } from './nl.js';
 import { FEATURES, GENRES, COUNTRIES, COUNTRY_NAME, MOODS, ORDERS, THEMES, themeOf } from './data.js';
 import { store, esc, norm } from './util.js';
 import * as keySync from './sync.js';
+import * as upd from './update.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -480,9 +481,9 @@ function renderTracks() {
   if (s.theme) {
     const th = s.theme;
     notes.push(
-      `テーマの曲の出どころ：Last.fm のタグ ${th.fromLastfm} 曲、Claude ${th.fromClaude} 曲、両方 ${th.fromBoth} 曲。` +
+      `テーマの曲の出どころ：${th.fromClassics ? `定番曲リスト ${th.fromClassics} 曲（重複あり）、` : ''}Last.fm のタグ ${th.fromLastfm} 曲、Claude ${th.fromClaude} 曲、両方 ${th.fromBoth} 曲。` +
         (!th.claudeUsed ? '\nClaude の API キーがこのページに設定されていないため、Last.fm のタグだけで選んでいます（Last.fm のタグは洋楽のマニアックな曲に偏りがちです）。「設定」でキーを入れると、誰もが知っている定番曲が増えます。' : '') +
-        (th.claudeError ? `\nClaude への問い合わせに失敗しました：${th.claudeError}` : '') +
+        (th.claudeError ? '\n' + claudeErrorText(th.claudeError) : '') +
         (th.soundActive ? '\nBPM などのサウンド条件が付いています。定番曲がこの条件で外れていることがあるので、テーマで探すときは外すのがおすすめです。' : ''),
     );
   }
@@ -548,26 +549,40 @@ function camelot(key, mode) {
   return mode === 1 ? `${CAMELOT_MAJ[key]}B` : `${CAMELOT_MIN[key]}A`;
 }
 
+// Claude API のエラーを分かる言葉に
+function claudeErrorText(msg) {
+  if (/credit balance/i.test(msg)) return 'Claude の API のクレジット残高が足りないため、Claude を使えませんでした。Claude Console（platform.claude.com）の「Plans & Billing」でクレジットを購入すると、定番曲がさらに増えます。';
+  if (/authentication|invalid x-api-key|401/i.test(msg)) return 'Claude の API キーが正しくありません。「設定」でキーを確認してください。';
+  if (/rate.?limit|429|overloaded|529/i.test(msg)) return 'Claude が混み合っていて使えませんでした。少し待ってから「作り直す」を押してください。';
+  return `Claude への問い合わせに失敗しました：${msg}`;
+}
+
 // Spotify アプリで再生（動いているデバイスがなければ開いている Spotify を探す）
 // 再生の権限がない古いログインなら、一覧を一時保存してログインし直す（戻ったら一覧を復元）
 function reloginForPlayback() {
   toast('再生の権限を付けるため、Spotify にログインし直します…');
-  try {
-    sessionStorage.setItem(
-      'spm.pendingResult',
-      JSON.stringify({
-        tracks: state.tracks.map((t) => ({ ...t, sources: [...(t.sources || new Map()).entries()] })),
-        stats: state.stats,
-        name: $('#pl-name').value,
-        desc: $('#pl-desc').value,
-      }),
-    );
-  } catch {}
-  store.set('spm.lastCriteria', collectCriteria());
+  savePendingResult();
   setTimeout(() => sp.login().catch((e) => showError(e)), 600);
 }
 
-function restorePendingResult() {
+// 読み直し（ログインし直し・新しい版に更新）の前に、条件と曲の一覧を一時保存する
+function savePendingResult() {
+  try {
+    if (state.tracks.length)
+      sessionStorage.setItem(
+        'spm.pendingResult',
+        JSON.stringify({
+          tracks: state.tracks.map((t) => ({ ...t, sources: [...(t.sources || new Map()).entries()] })),
+          stats: state.stats,
+          name: $('#pl-name').value,
+          desc: $('#pl-desc').value,
+        }),
+      );
+  } catch {}
+  store.set('spm.lastCriteria', collectCriteria());
+}
+
+function restorePendingResult(msg) {
   let d = null;
   try {
     d = JSON.parse(sessionStorage.getItem('spm.pendingResult') || 'null');
@@ -579,7 +594,33 @@ function restorePendingResult() {
   $('#pl-name').value = d.name || '';
   $('#pl-desc').value = d.desc || '';
   renderTracks();
-  toast('ログインし直しました。もう一度「再生」を押してください');
+  if (msg) toast(msg);
+}
+
+// 新しい版：ボタンを出す。タブが隠れたとき、曲を探している最中でなければ自動で更新する
+function setupUpdate() {
+  const btn = $('#btn-update');
+  let reloading = false;
+  const reload = () => {
+    if (reloading) return;
+    reloading = true;
+    savePendingResult();
+    sessionStorage.setItem('spm.updated', '1');
+    upd.applyUpdate();
+  };
+  const check = async () => {
+    if (await upd.checkUpdate()) btn.hidden = false;
+  };
+  btn.addEventListener('click', reload);
+  upd.initUpdate().then(() => setTimeout(check, 20e3));
+  setInterval(() => document.visibilityState === 'visible' && check(), 10 * 60e3);
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'hidden') {
+      if (!btn.hidden && !state.busy) reload();
+      return;
+    }
+    check();
+  });
 }
 
 async function playInApp(t) {
@@ -882,14 +923,20 @@ function init() {
   // 四辻 NEXT と同じサイトに置いたときは、戻るリンクを出す
   $('#link-next').hidden = !/\/forge\/(index\.html)?$/.test(location.pathname);
   const last = store.get('spm.lastCriteria');
-  if (backFromLogin && last) applyCriteria(last);
+  const updated = sessionStorage.getItem('spm.updated');
+  sessionStorage.removeItem('spm.updated');
+  if ((backFromLogin || updated) && last) applyCriteria(last);
   else applyCriteria({});
 
+  setupUpdate();
   sp.handleCallback()
     .then((done) => {
       if (done) {
         toast('Spotify にログインしました');
+        restorePendingResult('ログインし直しました。もう一度「再生」を押してください');
+      } else if (updated) {
         restorePendingResult();
+        toast('新しい版に更新しました');
       }
     })
     .catch((e) => showError(e))

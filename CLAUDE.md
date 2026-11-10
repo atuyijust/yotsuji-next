@@ -89,10 +89,13 @@ Spotify（人気度・レーベル・リリース・アーティストのジャ�
 - もとは `~/Documents/spotify-playlist-maker` で作ったもの。今後は `forge/` を正とする
 - Redirect URI は置いたフォルダの URL（`https://atuyijust.github.io/yotsuji-next/forge/`）。Spotify Dashboard に登録が必要
 - 同じサイトなので localStorage を共有する: Client ID は Forge の `spm.clientId` が空なら四辻 NEXT の `cid` を使う。トークンは別々（スコープが違うため）
-- 連携: 四辻 NEXT のヘッダー「プレイリスト作成 ↗」、デッキの「似た曲でプレイリスト ↗」（`forge/?seedTrack=曲ID` を別タブ `forge` で開く → Forge が「似せたい曲」に入れる。未ログインならログイン後に）
+- 連携: 四辻 NEXT のヘッダー「プレイリスト作成 ↗」（デッキの「似た曲でプレイリスト ↗」はうまく動かずユーザー指定で削除）
 - Forge の右上「四辻 NEXT」で戻る（パスが `/forge/` のときだけ表示）
 - 設定の共有: Forge の Last.fm / Claude の API キーは、四辻 NEXT の同期 Gist（`yotsuji-next-sync.json` がある Gist）に別ファイル `playlist-forge-settings.json` として置く（`forge/js/sync.js`、ユーザー指定）。四辻 NEXT の `ghTok` / `gistId` をそのまま使う。開いたとき、この端末に無いキーだけ受け取り、この端末のキーが変わっていれば送る
 - Forge は Client ID が分かっていて未ログインなら、開いたときに自動で Spotify ログインへ（タブごとに 1 回、sessionStorage `spm.autoLogin`）
+- Forge のアイコンは `forge/` の中に専用のもの（`icon.svg` が元。PNG は headless Chrome で書き出し、`icon-maskable-512.png`・`apple-touch-icon.png` は全面塗り）。四辻 NEXT のアイコンと見分けられるように（ユーザー指定）
+- Forge の「新しい版に更新」（`forge/js/update.js`、四辻 NEXT の checkUpdate と同じ考え方）: 開いたときのファイル群のハッシュと、公開中（`cache:'no-store'`）のハッシュを20秒後・表示中10分おき・画面復帰時に比べ、違えば `#btn-update` を出す。押すかタブが隠れたとき（曲を探している最中以外）に、条件と一覧を sessionStorage に保存し、キャッシュを `cache:'reload'` で入れ替えてから読み直す。新しい JS ファイルを足したら `FILES` にも足す
+- テーマの定番曲: `data.js` の THEMES に `classics`（ハロウィン・クリスマス）。Claude が使えない（クレジット切れなど）ときも定番曲が入る。Last.fm・Claude・定番曲のうち2つ以上で見つかった曲は +0.25
 
 ## やらないこと
 - 第三者APIキーのコード埋め込み
