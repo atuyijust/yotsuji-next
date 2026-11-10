@@ -336,8 +336,13 @@ function jsonp(url, timeout = 12000) {
 /**
  * テーマの言葉で Deezer の公開プレイリストを探し、何本のプレイリストに入っているかで曲を並べる。
  * 人が「ハロウィンのプレイリスト」に入れた曲＝その時期に実際によく流れる曲。
- * 返り値: { tracks: [{title, artist, isrc, lists}], playlists }（lists が多い順）
+ * 返り値: { tracks: [{title, artist, isrc, lists, score, from: [プレイリスト名]}], playlists }（score＝収録数、映画系は 0.5 として数える。多い順）
  */
+// 映画・ドラマのサントラ、子ども向け、作業用 BGM などのプレイリストは「その場面で流れる曲」とは限らないので、半分の重みにする
+// （例: ハロウィンで『ビートルジュース』の Jump in the Line が入る）
+const DZ_WEAK = /soundtrack|movie|film|cin[eé]ma|\bost\b|score|tim burton|wednesday|buffy|addams|beetlejuice|series|tv|kids|enfant|kinder|bibi|lofi|lo-fi|classical|classique|klassik|piano|sleep|study|サントラ|映画|ドラマ|キッズ|子ども/i;
+export const dzWeak = (title) => DZ_WEAK.test(title || '');
+
 export async function deezerThemeTracks(queries, { maxLists = 20 } = {}) {
   const seen = new Map();
   for (const q of queries) {
@@ -359,13 +364,15 @@ export async function deezerThemeTracks(queries, { maxLists = 20 } = {}) {
         const key = t.isrc || `${norm(t.artist?.name)}|${norm(t.title_short || t.title)}`;
         if (inList.has(key)) continue;
         inList.add(key);
-        const e = count.get(key) || { title: t.title_short || t.title, artist: t.artist?.name || '', isrc: t.isrc || '', lists: 0, rank: 0 };
+        const e = count.get(key) || { title: t.title_short || t.title, artist: t.artist?.name || '', isrc: t.isrc || '', lists: 0, score: 0, from: [], rank: 0 };
         e.lists++;
+        e.score += dzWeak(p.title) ? 0.5 : 1;
+        e.from.push(p.title);
         e.rank = Math.max(e.rank, t.rank || 0);
         count.set(key, e);
       }
     }),
   );
-  const tracks = [...count.values()].sort((a, b) => b.lists - a.lists || b.rank - a.rank);
+  const tracks = [...count.values()].sort((a, b) => b.score - a.score || b.rank - a.rank);
   return { tracks, playlists: lists.length };
 }

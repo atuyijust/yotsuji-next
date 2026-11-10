@@ -74,7 +74,7 @@ export async function generate(c, onProgress = () => {}) {
   };
 
   // themeFrom: テーマの根拠（'lf' = Last.fm のタグ、'ai' = Gemini・Claude、'cl' = 組み込みの定番曲、'dz' = Deezer の公開プレイリスト）。2 つ以上で見つかった曲ほど確か
-  const add = (t, source, weight = 0, themeFrom = '') => {
+  const add = (t, source, weight = 0, themeFrom = '', why = '') => {
     if (!t?.id) return;
     let e = pool.get(t.id);
     if (!e) {
@@ -88,6 +88,11 @@ export async function generate(c, onProgress = () => {}) {
     if (themeFrom === 'ai') e.themeAi = Math.max(e.themeAi || 0, weight);
     if (themeFrom === 'cl') e.themeCl = Math.max(e.themeCl || 0, weight);
     if (themeFrom === 'dz') e.themeDz = Math.max(e.themeDz || 0, weight);
+    // テーマに入った根拠（画面の「テーマ」を押すと出る）
+    if (why) {
+      e.themeWhy = e.themeWhy || [];
+      if (!e.themeWhy.includes(why)) e.themeWhy.push(why);
+    }
   };
 
   const searchPages = async (query, n, filterFn) => {
@@ -401,7 +406,7 @@ export async function generate(c, onProgress = () => {}) {
             const tr = await sp.resolveTrack(t.artist, t.name, yf).catch(() => null);
             // テーマのタグは上位ほど確か（下位は数人が付けただけのことが多い）
             const decay = source === 'theme' ? Math.min(0.6, t.rank / 500) : Math.min(0.5, t.rank / 2000);
-            if (tr) add(tr, source, weight * (1 - decay), source === 'theme' ? 'lf' : '');
+            if (tr) add(tr, source, weight * (1 - decay), source === 'theme' ? 'lf' : '', source === 'theme' ? `Last.fm のタグ「${tag}」（${t.rank + 1} 位）` : '');
           }),
         );
         if (!buffer.length && page >= Math.min(totalPages, 20)) ex.done = true;
@@ -427,7 +432,7 @@ export async function generate(c, onProgress = () => {}) {
             classics.map(async ([title, artist], i) => {
               if (excludeArtistNames.has(norm(artist)) || scriptExcluded(`${artist} ${title}`)) return;
               const tr = await sp.resolveTrack(artist, title, yf).catch(() => null);
-              if (tr) add(tr, 'theme', 0.6 - i / 1000, 'cl');
+              if (tr) add(tr, 'theme', 0.6 - i / 1000, 'cl', '組み込みの定番曲リスト');
             }),
           );
         },
@@ -447,7 +452,8 @@ export async function generate(c, onProgress = () => {}) {
             const r = await src.deezerThemeTracks(queries).catch((e) => (console.warn('[playlist-forge] deezer', e), { tracks: [], playlists: 0 }));
             dzLists = r.playlists;
             // 1 本にしか入っていない曲は、プレイリストが少ないときだけ使う（その人の好みが混ざるため）
-            ranked = r.tracks.filter((t) => t.lists >= 2 || r.playlists <= 3).slice(0, 300);
+            // 映画・サントラ系だけに入っている曲は、通常のプレイリスト 2 本ぶん以上にならないと外れる
+            ranked = r.tracks.filter((t) => t.score >= 1.5 || r.playlists <= 3).slice(0, 300);
           }
           const batch = ranked.splice(0, 60);
           if (!ranked.length) ex.done = true;
@@ -455,7 +461,8 @@ export async function generate(c, onProgress = () => {}) {
             batch.map(async (t) => {
               const tr = (t.isrc && (await sp.resolveIsrc(t.isrc, yf).catch(() => null))) || (await sp.resolveTrack(t.artist, t.title, yf).catch(() => null));
               if (!tr || tr.artists.some((a) => excludeArtistNames.has(norm(a.name))) || scriptExcluded(`${tr.artists.map((a) => a.name).join(' ')} ${tr.name}`)) return;
-              add(tr, 'theme', 0.3 + 0.08 * Math.min(t.lists, 4), 'dz');
+              const more = t.from.length > 4 ? ` ほか ${t.from.length - 4} 本` : '';
+              add(tr, 'theme', 0.3 + 0.08 * Math.min(t.score, 4), 'dz', `Deezer の ${t.lists} 本のプレイリストに収録：${t.from.slice(0, 4).map((x) => `「${x}」`).join('')}${more}`);
             }),
           );
         },
@@ -504,7 +511,7 @@ export async function generate(c, onProgress = () => {}) {
             fresh.map(async (t, i) => {
               if (excludeArtistNames.has(norm(t.artist)) || scriptExcluded(`${t.artist} ${t.title}`)) return;
               const tr = await sp.resolveTrack(t.artist, t.title, yf).catch(() => null);
-              if (tr) add(tr, 'theme', 0.55 - Math.min(0.2, (rounds - 1) * 0.04 + i / 600), 'ai');
+              if (tr) add(tr, 'theme', 0.55 - Math.min(0.2, (rounds - 1) * 0.04 + i / 600), 'ai', `${aiUsed} が挙げた曲`);
             }),
           );
         },

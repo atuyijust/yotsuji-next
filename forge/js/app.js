@@ -24,12 +24,12 @@ const state = {
 
 // ---------------- 小物 ----------------
 let toastTimer;
-function toast(msg) {
+function toast(msg, ms = 3200) {
   const el = $('#toast');
   el.textContent = msg;
   el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (el.hidden = true), 3200);
+  toastTimer = setTimeout(() => (el.hidden = true), ms);
 }
 
 function showError(err) {
@@ -509,7 +509,7 @@ function renderTracks() {
         <div class="meta">
           <div class="title">${esc(x.name)}${x.explicit ? '<span class="e">E</span>' : ''}</div>
           <div class="sub">${esc(x.artists.map((a) => a.name).join(', '))}${x.album ? ` ・ ${esc(x.album.name)}` : ''}${x.album?.year ? ` ・ ${x.album.year}` : ''}</div>
-          <div class="tags">${src ? `<span class="tag src">${SRC_LABEL[src] || src}</span>` : ''}${tags.map((g) => `<span class="tag">${g}</span>`).join('')}</div>
+          <div class="tags">${src ? (x.themeWhy?.length ? `<button type="button" class="tag src why" title="${esc('テーマに入った理由\n・' + x.themeWhy.join('\n・'))}">${SRC_LABEL[src] || src} ⓘ</button>` : `<span class="tag src">${SRC_LABEL[src] || src}</span>`) : ''}${tags.map((g) => `<span class="tag">${g}</span>`).join('')}</div>
         </div>
         <div class="acts">
           <button class="btn-sm act-copy" title="曲名とアーティスト名をコピー">⎘</button>
@@ -523,6 +523,7 @@ function renderTracks() {
     .join('');
   list.querySelectorAll('.track').forEach((li) => {
     const i = Number(li.dataset.i);
+    li.querySelector('.why')?.addEventListener('click', () => toast(`「${state.tracks[i].name}」がテーマに入った理由：${state.tracks[i].themeWhy.join(' ／ ')}`, 9000));
     li.querySelector('.act-play').addEventListener('click', () => playInApp(state.tracks[i]));
     li.querySelector('.act-queue').addEventListener('click', () => queueInApp(state.tracks[i]));
     li.querySelector('.act-copy').addEventListener('click', () => copyTitle(state.tracks[i]));
