@@ -230,6 +230,16 @@
     <dialog id="settings">
       <form method="dialog" class="settings">
         <h2>設定</h2>
+        <div class="handoff">
+          <strong>ほかの端末と同じ設定にする</strong>
+          <p class="hint">Mac で「引き継ぎデータをコピー」→ iPhone で「貼り付けて引き継ぐ」を押すだけです（同じ Apple ID なら、Mac でコピーしたものを iPhone でそのまま貼り付けられます）。API キー・Client ID・保存した条件が入ります。</p>
+          <div class="row">
+            <button type="button" id="btn-handoff-copy" class="btn btn-ghost btn-sm">引き継ぎデータをコピー</button>
+            <button type="button" id="btn-handoff-paste" class="btn btn-primary btn-sm">貼り付けて引き継ぐ</button>
+          </div>
+          <textarea id="handoff-input" rows="2" placeholder="うまく貼り付けられないときは、ここに貼り付けてください" hidden></textarea>
+          <p class="hint">引き継ぎデータには API キーが入っています。人に送ったり、どこかに貼ったりしないでください。</p>
+        </div>
         <label>Spotify Client ID（必須）
           <input id="set-client" autocomplete="off" />
         </label>

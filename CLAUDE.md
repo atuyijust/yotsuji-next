@@ -92,6 +92,7 @@ Spotify（人気度・レーベル・リリース・アーティストのジャ�
 - 連携: 四辻 NEXT のヘッダー「プレイリスト作成 ↗」（デッキの「似た曲でプレイリスト ↗」はうまく動かずユーザー指定で削除）
 - Forge の右上「四辻 NEXT」で戻る（パスが `/forge/` のときだけ表示）
 - 設定の共有: Forge の Last.fm / Claude の API キーは、四辻 NEXT の同期 Gist（`yotsuji-next-sync.json` がある Gist）に別ファイル `playlist-forge-settings.json` として置く（`forge/js/sync.js`、ユーザー指定）。四辻 NEXT の `ghTok` / `gistId` をそのまま使う。開いたとき、この端末に無いキーだけ受け取り、この端末のキーが変わっていれば送る
+- Forge の端末の引き継ぎ（ユーザー指定「iPhone で設定し直さなくても Mac と同じ環境で」）: iPhone のホーム画面に追加したアプリは Safari と保存場所が別で、四辻 NEXT の `ghTok` も見えないため、Gist 同期だけでは届かない。設定の「引き継ぎデータをコピー」（`sync.js` `makeHandoff`、`PLAYLISTFORGE1:`＋base64 JSON：Client ID・各 API キー・`ghTok`・`gistId`・保存した条件・直前の条件）→ 相手の端末で「貼り付けて引き継ぐ」（`applyHandoff`、クリップボードを読めなければ欄に貼る）。読み直して自動で Spotify ログインへ。Spotify のトークンは渡さない（リフレッシュトークンが入れ替わり、元の端末がログアウトするため）。Gist の設定ファイルにも Client ID と保存した条件を載せ、無い名前の条件だけ足す
 - Forge は Client ID が分かっていて未ログインなら、開いたときに自動で Spotify ログインへ（タブごとに 1 回、sessionStorage `spm.autoLogin`）
 - Forge のアイコンは `forge/` の中に専用のもの（`icon.svg` が元。PNG は headless Chrome で書き出し、`icon-maskable-512.png`・`apple-touch-icon.png` は全面塗り）。四辻 NEXT のアイコンと見分けられるように（ユーザー指定）
 - Forge の「新しい版に更新」（`forge/js/update.js`、四辻 NEXT の checkUpdate と同じ考え方）: 開いたときのファイル群のハッシュと、公開中（`cache:'no-store'`）のハッシュを20秒後・表示中10分おき・画面復帰時に比べ、違えば `#btn-update` を出す。押すかタブが隠れたとき（曲を探している最中以外）に、条件と一覧を sessionStorage に保存し、キャッシュを `cache:'reload'` で入れ替えてから読み直す。新しい JS ファイルを足したら `FILES` にも足す

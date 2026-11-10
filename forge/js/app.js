@@ -746,6 +746,40 @@ function openSettings() {
 
 function setupSettings() {
   $('#btn-settings').addEventListener('click', openSettings);
+  $('#btn-handoff-copy').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(keySync.makeHandoff());
+      toast('引き継ぎデータをコピーしました。iPhone の Forge で「設定」→「貼り付けて引き継ぐ」を押してください', 6000);
+    } catch (e) {
+      showError(new Error(`コピーできませんでした：${e.message}`));
+    }
+  });
+  const doHandoff = (text) => {
+    try {
+      const n = keySync.applyHandoff(text);
+      sessionStorage.removeItem('spm.autoLogin');
+      sessionStorage.setItem('spm.handedOff', '1'); // 読み直したあと、引き継いだ条件を表示する
+      toast(`${n} 項目を引き継ぎました。読み直します…`);
+      setTimeout(() => location.reload(), 900);
+    } catch (e) {
+      toast(e.message, 6000);
+    }
+  };
+  $('#btn-handoff-paste').addEventListener('click', async () => {
+    const box = $('#handoff-input');
+    if (!box.hidden && box.value.trim()) return doHandoff(box.value);
+    try {
+      doHandoff(await navigator.clipboard.readText());
+    } catch {
+      // クリップボードを読めない（許可されない）ときは、欄に貼り付けてもらう
+      box.hidden = false;
+      box.focus();
+      toast('下の欄に貼り付けてから、もう一度「貼り付けて引き継ぐ」を押してください', 6000);
+    }
+  });
+  $('#handoff-input').addEventListener('input', (e) => {
+    if (e.target.value.includes('PLAYLISTFORGE1:')) doHandoff(e.target.value);
+  });
   $('#settings').addEventListener('close', () => {
     if ($('#settings').returnValue !== 'save') return;
     store.set('spm.clientId', $('#set-client').value.trim());
@@ -920,8 +954,11 @@ function init() {
   $('#link-next').hidden = !/\/forge\/(index\.html)?$/.test(location.pathname);
   const last = store.get('spm.lastCriteria');
   const updated = sessionStorage.getItem('spm.updated');
+  const handedOff = sessionStorage.getItem('spm.handedOff');
   sessionStorage.removeItem('spm.updated');
-  if ((backFromLogin || updated) && last) applyCriteria(last);
+  sessionStorage.removeItem('spm.handedOff');
+  if ((backFromLogin || updated || handedOff) && last) applyCriteria(last);
+  if (handedOff) setTimeout(() => toast('ほかの端末の設定を引き継ぎました。Spotify にログインすると、すぐに探せます', 6000), 400);
   else applyCriteria({});
 
   setupUpdate();
