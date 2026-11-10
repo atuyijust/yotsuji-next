@@ -349,6 +349,7 @@
       <label class="ck"><input type="checkbox" id="autoSync" checked> 自動で同期</label>
       <span class="muted" id="syncMsg"></span>
     </div>
+    <div class="muted" id="syncInfo" style="margin-top:4px;font-size:12px"></div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
       <button id="setupCopy" class="pri">iPhoneへ設定を渡す</button>
       <span class="muted">Client ID と同期のトークンをコピーします。iPhone で四辻 NEXT を開き「設定を貼り付ける」を押すだけで、Macと同じ状態になります（同じApple IDのユニバーサルクリップボード）</span>
@@ -1438,31 +1439,50 @@ async function syncPush(){
   try{ syncMsg("同期：送信中…"); let id=await findGist();
     // 送る前に受け取って合成（上書き事故を防ぐ）
     if(id){ const g=await (await gh("/gists/"+id)).json(); const f=g.files[SYNC_FILE]; if(f){ let txt=f.content; if(f.truncated) txt=await (await fetch(f.raw_url)).text(); try{ mergeMeta(JSON.parse(txt)); }catch{} } }
-    await libPush();
+    const dirtyAt=LS.get("syncDirty",0);
     const body={description:"四辻 NEXT 同期データ",public:false,files:{[SYNC_FILE]:{content:JSON.stringify(syncPayload())}}};
-    const r=await gh(id?"/gists/"+id:"/gists",{method:id?"PATCH":"POST",body:JSON.stringify(body)}); const j=await r.json(); LS.set("gistId",j.id); LS.set("lastSync",Date.now());
+    const r=await gh(id?"/gists/"+id:"/gists",{method:id?"PATCH":"POST",body:JSON.stringify(body)}); const j=await r.json();
+    if(!j.id) throw new Error("送信できませんでした（GitHub "+r.status+"）");
+    LS.set("gistId",j.id); LS.set("lastSync",Date.now()); LS.set("syncSentAt",Date.now()); if(j.history?.[0]?.version) LS.set("syncVer",j.history[0].version);
+    if(LS.get("syncDirty",0)===dirtyAt) LS.set("syncDirty",0);
     await DB.set("meta",S.meta); await DB.set("dg",S.dg); await DB.set("dz",S.dz);
-    syncMsg("同期：送信しました "+new Date().toLocaleTimeString()); }
+    syncMsg("同期：送信しました "+new Date().toLocaleTimeString());
+    // 曲データ（大きい）は後で。送ったら同期データの libAt を新しくするためもう一度送る
+    const sent=LS.get("libSent",0); await libPush(); if(LS.get("libSent",0)!==sent) syncQueued=true; }
   catch(e){ syncMsg("同期エラー："+e.message); }
-  finally{ syncing=false; if(syncQueued){ syncQueued=false; setTimeout(syncPush,3000); } }
+  finally{ syncing=false; syncInfo(); if(syncQueued){ syncQueued=false; setTimeout(syncPush,3000); } }
 }
 async function syncPull(applySettings){
   if(!LS.get("ghTok","")) return; if(syncing) return; syncing=true;
   try{ syncMsg("同期：受信中…"); const id=await findGist(); if(!id){ syncMsg("同期：まだデータがありません（この端末から「今すぐ送る」）"); return; }
     const g=await (await gh("/gists/"+id)).json(); const f=g.files[SYNC_FILE]; let txt=f.content; if(f.truncated) txt=await (await fetch(f.raw_url)).text();
-    const d=JSON.parse(txt); const n=mergeMeta(d);
+    const d=JSON.parse(txt); const n=mergeMeta(d); if(g.history?.[0]?.version) LS.set("syncVer",g.history[0].version);
     let nl=0; if((d.libAt||0)>LS.get("libStamp",0)) nl=await libPull();
     if(d.cid && !LS.get("cid","")) LS.set("cid",d.cid);
     if(applySettings){ if(d.plSel&&!LS.get("plSel",[]).length) LS.set("plSel",d.plSel); if(d.incSaved!=null&&LS.get("incSaved",null)==null) LS.set("incSaved",d.incSaved);
       for(const [k,v] of Object.entries(d.weights||{})) if(v!=null && LS.get(k,null)==null) LS.set(k,v);
       if(d.copyMode && !localStorage.getItem("copyMode")) LS.set("copyMode",d.copyMode);
       if(!S.hist.length && d.hist?.length){ S.hist=d.hist; LS.set("hist",S.hist); } if(!S.now && d.now){ S.now=d.now; LS.set("now",S.now); } }
-    await DB.set("meta",S.meta); await DB.set("dg",S.dg); await DB.set("dz",S.dz); LS.set("lastSync",Date.now());
+    await DB.set("meta",S.meta); await DB.set("dg",S.dg); await DB.set("dz",S.dz); LS.set("lastSync",Date.now()); LS.set("syncGotAt",Date.now());
     syncMsg(`同期：受信しました（${nl?`曲データ ${nl}曲・`:""}${n}曲のBPM等を更新）`); refresh(); renderTagFilter(); renderCcFilter(); }
   catch(e){ syncMsg("同期エラー："+e.message); }
-  finally{ syncing=false; }
+  finally{ syncing=false; syncInfo(); }
 }
-function autoSync(){ if(LS.get("autoSync",true) && LS.get("ghTok","")) setTimeout(syncPush,1500); }
+// 変更があったら印（syncDirty）を付けて1.5秒後に送る。送り終わる前に閉じても、印が残るので次に開いたとき・画面に戻ったときに送る
+let syncT=null;
+function autoSync(){ if(!LS.get("autoSync",true) || !LS.get("ghTok","")) return; LS.set("syncDirty",Date.now()); syncInfo(); clearTimeout(syncT); syncT=setTimeout(syncPush,1500); }
+// 開いたままでも他の端末の変更を受け取る: Gist の最新の版（commits の先頭、中身は読まないので軽い）が自分の知っている版と違うときだけ受け取る
+let syncCheckAt=0;
+async function syncCheck(){ if(!LS.get("autoSync",true) || !LS.get("ghTok","") || syncing || document.visibilityState!=="visible") return;
+  if(Date.now()-syncCheckAt<20e3) return; syncCheckAt=Date.now();
+  if(LS.get("syncDirty",0)){ syncPush(); return; }   // 送る前に受け取って合わせるので、受信も兼ねる
+  const id=LS.get("gistId",""); if(!id) return;
+  try{ const r=await gh(`/gists/${id}/commits?per_page=1`); if(!r.ok) return; const v=(await r.json())[0]?.version;
+    if(v && v!==LS.get("syncVer","")) await syncPull(false); }catch{} }
+function syncInfo(){ const el=$("#syncInfo"); if(!el) return; if(!LS.get("ghTok","")){ el.textContent=""; return; }
+  const t=k=>{ const v=LS.get(k,0); return v?new Date(v).toLocaleString("ja-JP",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}):"—"; };
+  const id=LS.get("gistId","");
+  el.textContent=`最後に送信 ${t("syncSentAt")} ／ 受信 ${t("syncGotAt")}${LS.get("syncDirty",0)?" ／ 未送信の変更あり":""} ／ Gist ${id?id.slice(0,7):"未作成"}（Mac と iPhone で同じならOK）`; }
 
 // ---------- rekordbox XML ----------
 function norm(s){ return String(s||"").toLowerCase().normalize("NFKC")
@@ -1722,8 +1742,10 @@ $("#autoInfo").checked=LS.get("autoInfo",true); $("#autoInfo").onchange=e=>{ LS.
   if(!S.scanning) setTimeout(acFill,5e3);
   setTimeout(checkUpdate,20e3);
   setInterval(async()=>{ if(document.visibilityState!=="visible") return; await checkUpdate(); autoRefreshLib(); },10*60e3);
+  setInterval(syncCheck,60e3); syncInfo();
   document.addEventListener("visibilitychange",async()=>{
-    if(document.visibilityState==="hidden"){ maybeReload(); return; }
+    if(document.visibilityState==="hidden"){ if(LS.get("syncDirty",0) && LS.get("autoSync",true) && LS.get("ghTok","") && !syncing){ clearTimeout(syncT); syncPush(); } maybeReload(); return; }
+    if($("#follow").checked && !LS.get("dj",false)) poll(); syncCheck();
     if(await checkUpdate() && !LS.get("dj",false)){ maybeReload(); if(updReady&&!busy()) return; }
     if(!await token()){ if(tryAutoLogin()) return; } else autoRefreshLib();
   });
