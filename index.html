@@ -1371,7 +1371,8 @@ function renderInfo(){
 const SYNC_FILE="yotsuji-next-sync.json";
 function syncMsg(m){ setStatus(m); if($("#syncMsg")) $("#syncMsg").textContent=m; }
 async function gh(path,opt={}){ const tok=LS.get("ghTok",""); if(!tok) throw new Error("トークン未設定");
-  const r=await fetch("https://api.github.com"+path,{...opt,headers:{Authorization:"Bearer "+tok,Accept:"application/vnd.github+json","Content-Type":"application/json",...(opt.headers||{})}});
+  // cache:"no-store": GitHub API は max-age=60 で、ブラウザが1分前の Gist を返すことがある。古いまま合成して送ると他の端末のタグを消してしまうため
+  const r=await fetch("https://api.github.com"+path,{cache:"no-store",...opt,headers:{Authorization:"Bearer "+tok,Accept:"application/vnd.github+json","Content-Type":"application/json",...(opt.headers||{})}});
   if(r.status===401) throw new Error("トークンが無効です"); if(r.status===403) throw new Error("権限不足（GistsをRead and writeに）");
   if(!r.ok && r.status!==404) throw new Error("GitHub "+r.status); return r; }
 async function findGist(){ let id=LS.get("gistId",""); if(id){ const r=await gh("/gists/"+id); if(r.ok) return id; }
@@ -1399,7 +1400,7 @@ async function libPush(){ const stamp=LS.get("libStamp",0); if(!stamp || stamp<=
 async function libPull(){ const id=await findLibGist(); if(!id) return 0;
   syncMsg("同期：曲データを受信中…");
   const g=await (await gh("/gists/"+id)).json(); const f=g.files?.[LIB_FILE]; if(!f) return 0;
-  const d=JSON.parse(f.truncated ? await (await fetch(f.raw_url)).text() : f.content);
+  const d=JSON.parse(f.truncated ? await (await fetch(f.raw_url,{cache:"no-store"})).text() : f.content);
   if(!(d.at>LS.get("libStamp",0))) return 0;
   for(const r of d.tracks||[]){ const [id,name,ar,album,albumId,dur,isrc,img,pop,year,na]=r;
     S.tracks[id]={id,uri:"spotify:track:"+id,name,artists:ar.map(([id,name])=>({id,name})),album,albumId,dur,isrc,img:(img||"").replace(/^~/,IMG_PRE),pop,year}; if(na) S.tracks[id].na=1; }
@@ -1438,7 +1439,7 @@ async function syncPush(){
   if(!LS.get("ghTok","")) return; if(syncing){ syncQueued=true; return; } syncing=true;
   try{ syncMsg("同期：送信中…"); let id=await findGist();
     // 送る前に受け取って合成（上書き事故を防ぐ）
-    if(id){ const g=await (await gh("/gists/"+id)).json(); const f=g.files[SYNC_FILE]; if(f){ let txt=f.content; if(f.truncated) txt=await (await fetch(f.raw_url)).text(); try{ mergeMeta(JSON.parse(txt)); }catch{} } }
+    if(id){ const g=await (await gh("/gists/"+id)).json(); const f=g.files[SYNC_FILE]; if(f){ let txt=f.content; if(f.truncated) txt=await (await fetch(f.raw_url,{cache:"no-store"})).text(); try{ mergeMeta(JSON.parse(txt)); }catch{} } }
     const dirtyAt=LS.get("syncDirty",0);
     const body={description:"四辻 NEXT 同期データ",public:false,files:{[SYNC_FILE]:{content:JSON.stringify(syncPayload())}}};
     const r=await gh(id?"/gists/"+id:"/gists",{method:id?"PATCH":"POST",body:JSON.stringify(body)}); const j=await r.json();
@@ -1455,7 +1456,7 @@ async function syncPush(){
 async function syncPull(applySettings){
   if(!LS.get("ghTok","")) return; if(syncing) return; syncing=true;
   try{ syncMsg("同期：受信中…"); const id=await findGist(); if(!id){ syncMsg("同期：まだデータがありません（この端末から「今すぐ送る」）"); return; }
-    const g=await (await gh("/gists/"+id)).json(); const f=g.files[SYNC_FILE]; let txt=f.content; if(f.truncated) txt=await (await fetch(f.raw_url)).text();
+    const g=await (await gh("/gists/"+id)).json(); const f=g.files[SYNC_FILE]; let txt=f.content; if(f.truncated) txt=await (await fetch(f.raw_url,{cache:"no-store"})).text();
     const d=JSON.parse(txt); const n=mergeMeta(d); if(g.history?.[0]?.version) LS.set("syncVer",g.history[0].version);
     let nl=0; if((d.libAt||0)>LS.get("libStamp",0)) nl=await libPull();
     if(d.cid && !LS.get("cid","")) LS.set("cid",d.cid);
