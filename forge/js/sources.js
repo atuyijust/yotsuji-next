@@ -376,3 +376,46 @@ export async function deezerThemeTracks(queries, { maxLists = 20 } = {}) {
   const tracks = [...count.values()].sort((a, b) => b.score - a.score || b.rank - a.rank);
   return { tracks, playlists: lists.length };
 }
+
+// ---------------- ジャンル（表示用） ----------------
+// Last.fm のアーティストのタグからジャンルらしいものを最大 2 つ。キーがない・見つからないときは Deezer のアルバムのジャンル
+const GENRE_RE = /\b(punk|rock|pop|metal|core|emo|ska|jazz|soul|funk|disco|house|techno|trance|dub|dubstep|garage|grime|drill|trap|rap|hip ?hop|r&b|rnb|blues|folk|country|indie|wave|gaze|ambient|electro\w*|edm|breaks|breakbeat|jungle|drum and bass|dnb|reggae\w*|latin|bossa|samba|afro\w*|gospel|grunge|psych\w*|prog\w*|lo-?fi|city pop|j-?pop|j-?rock|k-?pop|anime|vocaloid|enka|classical|soundtrack|bebop|industrial|goth\w*|post-\w+|thrash|doom|stoner|grind\w*|rockabilly|dance|synth\w*|chill\w*|downtempo|trip.hop|idm|swing|motown|new jack|acid|big beat|eurobeat|italo|hyperpop|phonk|amapiano|kayokyoku|shibuya-kei|singer-songwriter|acoustic|instrumental|experimental|alternative|bluegrass|americana|calypso|exotica|surf|doo.wop|crooner|easy listening|lounge|bass|club|footwork|juke|ballad)\b/i;
+const GENRE_NG = /seen live|favou?rite|vocalists?|^\d0s$|\d{4}|best|awesome|love|beautiful|my |spotify|under \d|american|british|english|japanese|german|french|swedish|canadian|australian|korean|usa|uk$/i;
+const GENRE_KEY = 'spm.genreCache';
+const genreCache = store.get(GENRE_KEY, {});
+let genreTimer = null;
+const saveGenres = () => {
+  clearTimeout(genreTimer);
+  genreTimer = setTimeout(() => {
+    const keys = Object.keys(genreCache);
+    for (const k of keys.slice(0, Math.max(0, keys.length - 5000))) delete genreCache[k];
+    store.set(GENRE_KEY, genreCache);
+  }, 1000);
+};
+export const cachedGenres = (artist) => genreCache[norm(artist)];
+
+export async function artistGenres(artist, title = '') {
+  const k = norm(artist);
+  if (k in genreCache) return genreCache[k];
+  let out = [];
+  if (getLastfmKey()) {
+    const d = await lastfm('artist.gettoptags', { artist }).catch(() => null);
+    out = (d?.toptags?.tag || [])
+      .map((t) => String(t.name || '').toLowerCase().trim())
+      .filter((t) => t && t.split(/\s+/).length <= 3 && GENRE_RE.test(t) && !GENRE_NG.test(t))
+      .slice(0, 2);
+  }
+  if (!out.length) {
+    // Deezer：曲を検索 → アルバムのジャンル（Pop・Rock のような大まかな分類）
+    const q = `${artist} ${title}`.trim(); // Deezer の artist:"…" 指定は JSONP では効かないので、普通の検索で
+    const s = await jsonp(`https://api.deezer.com/search?limit=1&q=${encodeURIComponent(q)}`).catch(() => null);
+    const al = s?.data?.[0]?.album?.id;
+    if (al) {
+      const a = await jsonp(`https://api.deezer.com/album/${al}`).catch(() => null);
+      out = (a?.genres?.data || []).map((g) => String(g.name).toLowerCase()).slice(0, 2);
+    }
+  }
+  genreCache[k] = out;
+  saveGenres();
+  return out;
+}

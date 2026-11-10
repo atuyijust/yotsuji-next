@@ -4,6 +4,7 @@ import { parseRequest, aiName, aiErrorText } from './nl.js';
 import { FEATURES, GENRES, COUNTRIES, COUNTRY_NAME, MOODS, ORDERS, THEMES, themeOf } from './data.js';
 import { store, esc, norm } from './util.js';
 import * as keySync from './sync.js';
+import * as src from './sources.js';
 import * as upd from './update.js';
 
 const $ = (s) => document.querySelector(s);
@@ -62,6 +63,7 @@ function renderAllChips() {
   renderChips('#genres', state.genres, (g) => g, (i) => (state.genres.splice(i, 1), renderAllChips()));
   renderChips('#seeds', state.seeds, (a) => a.name, (i) => (state.seeds.splice(i, 1), renderAllChips()), (a) => a.image);
   renderChips('#seed-tracks', state.seedTracks, (t) => `${t.name} – ${t.artist}`, (i) => (state.seedTracks.splice(i, 1), renderAllChips()), (t) => t.image);
+  renderSeedInfo();
   renderChips('#labels', state.labels, (l) => l, (i) => (state.labels.splice(i, 1), renderAllChips()));
   renderChips('#countries', state.countries, (c) => `${COUNTRY_NAME[c] || c}`, (i) => (state.countries.splice(i, 1), renderAllChips()));
   renderChips('#ex-countries', state.exCountries, (c) => `${COUNTRY_NAME[c] || c} を除外`, (i) => (state.exCountries.splice(i, 1), renderAllChips()));
@@ -496,20 +498,20 @@ function renderTracks() {
       const f = x.features || {};
       const tags = [];
       if (f.tempo) tags.push(`BPM ${f.tempo.toFixed(1)}`);
-      const ck = camelot(f.key, f.mode);
-      if (ck) tags.push(`<span class="key">${ck}</span>`);
+      const kl = keyLabel(f.key, f.mode);
+      if (kl) tags.push(`<span class="key">${kl}</span>`);
       if (f.energy != null) tags.push(`E ${Math.round(f.energy * 100)}`);
       if (f.danceability != null) tags.push(`D ${Math.round(f.danceability * 100)}`);
       if (f.valence != null) tags.push(`明 ${Math.round(f.valence * 100)}`);
       if (x.popularity != null) tags.push(`人気 ${x.popularity}`);
-      const src = [...x.sources.keys()][0];
+      const srcKey = [...x.sources.keys()][0];
       return `<li class="track" data-i="${i}">
         <span class="num">${i + 1}</span>
         ${x.album?.image ? `<img src="${esc(x.album.image)}" alt="" loading="lazy">` : '<span class="ph"></span>'}
         <div class="meta">
           <div class="title">${esc(x.name)}${x.explicit ? '<span class="e">E</span>' : ''}</div>
           <div class="sub">${esc(x.artists.map((a) => a.name).join(', '))}${x.album ? ` ・ ${esc(x.album.name)}` : ''}${x.album?.year ? ` ・ ${x.album.year}` : ''}</div>
-          <div class="tags">${src ? (x.themeWhy?.length ? `<button type="button" class="tag src why" title="${esc('テーマに入った理由\n・' + x.themeWhy.join('\n・'))}">${SRC_LABEL[src] || src} ⓘ</button>` : `<span class="tag src">${SRC_LABEL[src] || src}</span>`) : ''}${tags.map((g) => `<span class="tag">${g}</span>`).join('')}</div>
+          <div class="tags">${srcKey ? (x.themeWhy?.length ? `<button type="button" class="tag src why" title="${esc('テーマに入った理由\n・' + x.themeWhy.join('\n・'))}">${SRC_LABEL[srcKey] || srcKey} ⓘ</button>` : `<span class="tag src">${SRC_LABEL[srcKey] || srcKey}</span>`) : ''}${tags.map((g) => `<span class="tag">${g}</span>`).join('')}${(() => { const g = src.cachedGenres(x.artists[0]?.name || ''); return g ? genreTag(g) : '<span class="genre-slot"></span>'; })()}</div>
         </div>
         <div class="acts">
           <button class="btn-sm act-copy" title="「アーティスト名 - 曲名」をコピー">コピー</button>
@@ -539,6 +541,7 @@ function renderTracks() {
   });
   $('#result').hidden = false;
   $('#empty').hidden = true;
+  fillGenres();
 }
 
 // Camelot 表記のキー（DJ 向け。yotsuji-next と同じ）
@@ -547,6 +550,67 @@ const CAMELOT_MIN = [5, 12, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10];
 function camelot(key, mode) {
   if (key == null || key < 0 || key > 11 || (mode !== 0 && mode !== 1)) return '';
   return mode === 1 ? `${CAMELOT_MAJ[key]}B` : `${CAMELOT_MIN[key]}A`;
+}
+// キー：Camelot（DJ 向け）と音名（例: 8B C、5A Cm）
+const KEY_NAMES = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B'];
+function keyLabel(key, mode) {
+  const ck = camelot(key, mode);
+  return ck ? `${ck} ${KEY_NAMES[key]}${mode === 0 ? 'm' : ''}` : '';
+}
+
+// ---------------- ジャンル（Last.fm のアーティストのタグ／Deezer） ----------------
+const genreInflight = new Map();
+function genresOf(t) {
+  const a = t.artists?.[0]?.name || t.artist || '';
+  if (!a) return Promise.resolve([]);
+  const c = src.cachedGenres(a);
+  if (c) return Promise.resolve(c);
+  if (!genreInflight.has(a)) genreInflight.set(a, src.artistGenres(a, t.name).catch(() => []).finally(() => genreInflight.delete(a)));
+  return genreInflight.get(a);
+}
+const genreTag = (g) => (g?.length ? `<span class="tag genre">${esc(g.join(' / '))}</span>` : '');
+
+// 一覧の曲のジャンルを、分かったものから順に表示する
+async function fillGenres() {
+  const tracks = state.tracks;
+  const slots = new Map();
+  for (const li of $('#tracks').querySelectorAll('li[data-i]')) {
+    const t = tracks[Number(li.dataset.i)];
+    if (t && !src.cachedGenres(t.artists[0]?.name || '')) slots.set(li, t);
+  }
+  await Promise.all(
+    [...slots].map(async ([li, t]) => {
+      const g = await genresOf(t);
+      if (state.tracks !== tracks || !li.isConnected) return;
+      const slot = li.querySelector('.genre-slot');
+      if (slot) slot.outerHTML = genreTag(g);
+    }),
+  );
+}
+
+// 似せたい曲の BPM・キー・ジャンル
+let seedInfoRun = 0;
+async function renderSeedInfo() {
+  const box = $('#seed-track-info');
+  const seeds = state.seedTracks.filter((t) => t.id);
+  const run = ++seedInfoRun;
+  if (!seeds.length) return void (box.hidden = true);
+  const line = (t, f, g) => {
+    const parts = [];
+    if (f?.tempo) parts.push(`BPM ${f.tempo.toFixed(1)}`);
+    const k = f ? keyLabel(f.key, f.mode) : '';
+    if (k) parts.push(`キー ${k}`);
+    if (g?.length) parts.push(`ジャンル ${g.join(' / ')}`);
+    if (f === undefined || g === undefined) parts.push('読み込み中…');
+    else if (!parts.length) parts.push('データが見つかりませんでした');
+    return `<div><b>${esc(t.name)}</b>　${parts.map(esc).join(' ・ ')}</div>`;
+  };
+  box.hidden = false;
+  box.innerHTML = seeds.map((t) => line(t, undefined, src.cachedGenres(t.artist))).join('');
+  const feats = await src.audioFeatures(seeds.map((t) => t.id)).catch(() => new Map());
+  const genres = await Promise.all(seeds.map((t) => genresOf({ artists: [{ name: t.artist }], name: t.name })));
+  if (run !== seedInfoRun) return;
+  box.innerHTML = seeds.map((t, i) => line(t, feats.get(t.id) || null, genres[i] || [])).join('');
 }
 
 // Spotify アプリで再生（動いているデバイスがなければ開いている Spotify を探す）
