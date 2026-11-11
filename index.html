@@ -85,12 +85,14 @@
   .gj{font-size:11px;margin-left:6px;vertical-align:2px;white-space:nowrap} .gj.g{color:var(--accent)} .gj.y{color:var(--accent2)} .gj.r{color:var(--warn)}
   .gp.none{--h:0;color:var(--dim);background:none;border-color:var(--line);font-weight:400}
   .deck .gps{margin-top:4px} .deck .gps .gp{margin:0 4px 0 0;font-size:12px}
-  .cand{display:grid;grid-template-columns:34px 44px 1fr 70px 52px auto;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid var(--line)}
+  .cand{display:grid;grid-template-columns:34px 44px minmax(0,1fr) auto;gap:10px;align-items:start;padding:8px 6px;border-bottom:1px solid var(--line)}
   .cand:hover{background:#111415}
   .cand img{width:44px;height:44px;border-radius:3px;object-fit:cover;background:#222}
   .cand .sc{font:600 15px var(--mono);color:var(--accent);text-align:right}
   .cand .nm{font-weight:600}
   .cand .meta{font:12px var(--mono)}
+  .cand .rbox{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+  .cand .rmeta{display:flex;gap:16px;align-items:baseline;padding-top:2px}
   .chips{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px}
   .chip{background:var(--chip);border:1px solid var(--line);border-radius:10px;padding:0 7px;font-size:11px;color:var(--dim)}
   .chip.g{color:var(--accent);border-color:#2c4a41}
@@ -140,7 +142,7 @@
   /* 中くらいの幅では数値列（チップと重複）を畳んで情報列を守る */
   @media (max-width:1250px){
     .cand{grid-template-columns:30px 40px minmax(0,1fr) auto;gap:8px}
-    .cand .meta{display:none}
+    .cand .rmeta{display:none}
     .cand img{width:40px;height:40px}
   }
   body.dj [data-q], body.dj [data-p]{display:none}
@@ -189,8 +191,8 @@
     .filters{gap:6px 10px;padding-top:8px}
     .keys{display:none}
     .cand{grid-template-columns:30px 1fr;gap:4px 8px;padding:8px 4px}
-    .cand img,.cand .meta{display:none}
-    .cand .acts{grid-column:1 / -1;grid-row:2;justify-content:flex-end}
+    .cand img,.cand .rmeta{display:none}
+    .cand .rbox{grid-column:1 / -1;grid-row:2;flex-direction:row;justify-content:flex-end}
     .cand .acts button{padding:6px 10px;font-size:12px}
     .deck img{width:52px;height:52px}
     dialog{width:100vw;height:100vh;max-height:100vh;max-width:100vw;border-radius:0}
@@ -274,6 +276,7 @@
       </label>
       <label class="ck"><input type="checkbox" id="fKey"> キーが合う曲だけ</label>
       <label class="ck"><input type="checkbox" id="fArtist" checked> 同じアーティストを避ける</label>
+      <label class="ck" title="アーティストの国が日本（MusicBrainz）の曲を候補から外す。国が分からない曲は出す"><input type="checkbox" id="fNoJp"> 日本を除外</label>
       <label class="ck"><input type="checkbox" id="fHalf" checked> 倍／半分テンポも可</label>
       <span class="ck popf" title="Spotify人気度（POP）がこの範囲の曲だけ候補に出す。0〜100なら絞り込みなし（ダブルクリックで戻す）">POP
         <span class="dual"><input type="range" id="popMin" min="0" max="100" step="5" value="0" aria-label="POPの下限"><input type="range" id="popMax" min="0" max="100" step="5" value="100" aria-label="POPの上限"></span>
@@ -729,7 +732,7 @@ function suggest(){
   }
   const curBpm=bpmOf(cur), curKey=keyOf(cur), curGen=genOf(cur), curArt=new Set(S.tracks[cur]?.artists.map(a=>a.id)), curAf=afOf(cur);
   const lm=labelMap(), vctx={curAf, st:(M.af||M.snd)?afStats():{}, lm, curG:genreSet(cur,lm), curMood:moodOf(cur), mood:mode==="similar"};
-  const fB=+$("#fBpm").value, fK=$("#fKey").checked, fA=$("#fArtist").checked, half=$("#fHalf").checked;
+  const fB=+$("#fBpm").value, fK=$("#fKey").checked, fA=$("#fArtist").checked, half=$("#fHalf").checked, fNJ=$("#fNoJp")?.checked||false;
   const [pMin,pMax]=popRange(), fPop=pMin>0||pMax<100;  // POPの範囲（人気度が分からない曲は絞り込み中は出さない）
   const W={flow:w("wFlow")*M.flow,co:w("wCo")*M.co,bpm:w("wBpm")*M.bpm,key:w("wKey")*M.key,gen:w("wGen")*M.gen,year:w("wYear")*(M.year??1),cc:w("wCc")*(M.cc??1),af:M.af,nov:M.nov,rnd:M.rnd,pop:M.pop,eng:M.eng,cross:M.cross||0,snd:M.snd||0,slot:M.slot||0,mood:M.mood||0};
   const seed=cur+":"+(S.seed||0);
@@ -750,6 +753,7 @@ function suggest(){
     const venueMiss=fVenue && !tg.includes(fVenue);  // 場所の前提に合わない曲は候補から外す（候補が空なら参考表示行き）
     const sameArt = t.artists.some(a=>curArt.has(a.id));
     if(fA && sameArt) continue;
+    if(fNJ && countriesOf(id).includes("JP")) continue;  // 日本を除外（国が分かる曲だけ判定、国不明は出す）
     const chips=[]; let sc=0, slotD=null, noSlot=false;
     if(flow[id]){ const v=Math.min(1,flow[id]/2); sc+=W.flow*v; chips.push([W.flow<0?"":"g", flow[id]>=1?`直後に置いた×${Math.round(flow[id])}`:"直前に置いた"]); }
     if(co[id]){ const v=1-Math.exp(-co[id]*1.2); sc+=W.co*v; const n=(S.occ[id]||[]).filter(([pi])=>S.occ[cur].some(([pj])=>pj===pi)).length; chips.push(["", `同じPL×${n}`]); }
@@ -893,7 +897,7 @@ function renderCands(keepSel){
   if(later(()=>renderCands(true))) return;
   if(!keepSel) sel=0;
   // Now・選び方・絞り込みが変わったときだけ60曲に戻す（裏での描き直しでは戻さない）
-  const ck=[S.now,LS.get("mode","flow"),$("#fBpm").value,$("#fKey").checked,$("#fArtist").checked,$("#fHalf").checked,LS.get("fTag",""),LS.get("fCc",""),LS.get("fVenue",""),popRange().join("-")].join("|");
+  const ck=[S.now,LS.get("mode","flow"),$("#fBpm").value,$("#fKey").checked,$("#fArtist").checked,$("#fHalf").checked,LS.get("fTag",""),LS.get("fCc",""),LS.get("fVenue",""),$("#fNoJp")?.checked?"nj":"",popRange().join("-")].join("|");
   if(ck!==candCtx){ candCtx=ck; candLimit=60; candHold=false; }
   const list=suggest();
   if(candHold && candOrder){ const pos=new Map(candOrder.map((id,i)=>[id,i])); list.sort((a,b)=>(pos.get(a.id)??1e9)-(pos.get(b.id)??1e9)); }
@@ -904,8 +908,8 @@ function renderCands(keepSel){
   const rows = top.map((c,i)=>{ const t=S.tracks[c.id]; const m=S.meta[c.id]||{};
     return `<div class="cand${i===sel?" sel":""}" data-i="${i}" data-id="${c.id}"><span class="sc" title="全部の条件が揃ったときを100とした点">${list.weak?"—":c.pct}</span><img src="${esc(t.img)}" alt="" loading="lazy">
       <div><div class="nm">${esc(t.name)}${(()=>{ const gl=genreList(c.id,lm); return (gl.length?gl.slice(0,3).map(x=>genrePill(x)).join(""):`<span class="gp none" title="ジャンル不明">？</span>`)+(c.gst?`<span class="gj ${c.gst[0]}"${c.gst[2]?` title="${esc(c.gst[2])}"`:""}>${c.gst[1]}</span>`:""); })()}</div><div class="muted">${esc(arts(t))}${ccSpan(c.id,c.ccv)}<span class="cstars">${starsEdit(c.id,"data-crate")}</span></div>${subLine(c.id,lm,c.yv)}<div class="chips">${c.chips.map(([k,x])=>`<span class="chip ${k}">${esc(x)}</span>`).join("")}</div></div>
-      <span class="meta">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="meta" style="color:var(--accent2)">${m.key||"—"}</span>
-      <span class="acts"><button class="sm" data-tagbtn="${c.id}" title="この曲にタグ・評価を付ける">＃</button><button class="sm" data-c="${c.id}" title="曲名をコピー（rekordboxの検索に貼り付け）">⎘</button><button class="sm" data-q="${c.id}">キュー</button><button class="sm" data-p="${c.id}">再生</button><button class="sm" data-n="${c.id}">Nowへ</button></span></div>`; }).join("");
+      <div class="rbox"><div class="rmeta"><span class="meta">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="meta" style="color:var(--accent2)">${m.key||"—"}</span></div>
+      <span class="acts"><button class="sm" data-tagbtn="${c.id}" title="この曲にタグ・評価を付ける">＃</button><button class="sm" data-c="${c.id}" title="曲名をコピー（rekordboxの検索に貼り付け）">⎘</button><button class="sm" data-q="${c.id}">キュー</button><button class="sm" data-p="${c.id}">再生</button><button class="sm" data-n="${c.id}">Nowへ</button></span></div></div>`; }).join("");
   let html=(list.weak?`<div class="empty" style="padding:8px 0">今の曲の手がかり（BPM・キー・プレイリスト・音の特徴）が少ないので、参考として並べています。BPM／キーを入れるか、この曲を含むプレイリストを読み込むと精度が上がります。</div>`:"")+rows;
   const rest=list.length-top.length;
   if(rest>0) html+=`<div class="more"><button class="sm" id="moreCands">もっと見る（+${Math.min(60,rest)}曲 / 残り${rest}曲）</button></div>`;
@@ -1764,7 +1768,7 @@ $("#btnExport").onclick=e=>{ e.stopPropagation(); exportSet(); };
 $("#btnClearHist").onclick=e=>{ e.stopPropagation(); S.hist=[]; LS.set("hist",[]); refresh(); };
 ["wFlow","wCo","wBpm","wKey","wGen","wYear","wCc"].forEach(id=>{ const el=$("#"+id); const sp=el.nextElementSibling; el.value=LS.get(id,el.value); sp.textContent=el.value;
   el.oninput=()=>{ sp.textContent=el.value; LS.set(id,el.value); renderCands(); }; });
-["fBpm","fKey","fArtist","fHalf"].forEach(id=>$("#"+id).onchange=renderCands);
+["fBpm","fKey","fArtist","fHalf","fNoJp"].forEach(id=>$("#"+id).onchange=renderCands);
 // POPの範囲スライダー（つまみ2つ。下限が上限を越えないように押し戻す）。動かしている間は表示だけ、離したら候補を出し直す
 function popRange(){ return [+$("#popMin").value, +$("#popMax").value]; }
 function popShow(){ const [a,b]=popRange(); $("#popVal").textContent=a<=0&&b>=100?"すべて":`${a}〜${b}`;
