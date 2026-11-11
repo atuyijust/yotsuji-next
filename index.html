@@ -46,6 +46,8 @@
   body.resizing{cursor:col-resize;user-select:none}
   section.list{overflow:auto;padding:14px 18px}
   h2{font:600 11px var(--mono);letter-spacing:.15em;color:var(--dim);margin:18px 0 8px;text-transform:uppercase}
+  .npRow{display:flex;align-items:center;gap:6px 14px;flex-wrap:wrap;margin:18px 0 8px}
+  .npRow h2{margin:0}
   h2:first-child{margin-top:0}
   .deck{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
   .deck .row{display:flex;gap:10px;align-items:center}
@@ -135,11 +137,7 @@
   .dual input::-moz-range-track{background:none} .dual input::-moz-range-thumb{pointer-events:auto;width:12px;height:12px;border-radius:50%;background:var(--accent);border:2px solid var(--bg);cursor:pointer}
   img[src=""]{visibility:hidden}
   .cand.sel{background:#16201d;outline:1px solid #2c4a41}
-  /* 候補行の圧縮: 広い画面では理由チップを情報列の右に回して縦の余白を消す。中くらいの幅では数値列（チップと重複）を畳んで情報列を守る */
-  @media (min-width:1251px){
-    .cand>div{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:12px}
-    .cand>div>.chips{grid-column:2;grid-row:1/-1;max-width:250px;justify-content:flex-end;align-content:start;margin-top:0}
-  }
+  /* 中くらいの幅では数値列（チップと重複）を畳んで情報列を守る */
   @media (max-width:1250px){
     .cand{grid-template-columns:30px 40px minmax(0,1fr) auto;gap:8px}
     .cand .meta{display:none}
@@ -240,17 +238,12 @@
 </header>
 <main>
   <aside>
-    <h2>Now Playing</h2>
+    <div class="npRow"><h2>Now Playing</h2><label class="ck follow-row"><input type="checkbox" id="follow"> Spotifyの再生中を追従</label><label class="ck" title="Spotify / Deezer / MusicBrainz / Discogs / Wikipedia から曲・アーティスト情報を自動で集めます"><input type="checkbox" id="autoInfo" checked> 曲情報を自動収集</label></div>
     <div class="deck" id="deck"><div class="muted">曲が未選択です。下の検索か、Spotifyの再生追従で選んでください。</div></div>
-    <details class="info" id="info" open><summary>この曲について</summary><div id="infoBody" class="muted">—</div></details>
-    <div class="bk follow-row">
-      <label class="ck"><input type="checkbox" id="follow"> Spotifyの再生中を追従</label>
-    </div>
-    <div class="bk"><label class="ck" title="Spotify / Deezer / MusicBrainz / Discogs / Wikipedia から曲・アーティスト情報を自動で集めます"><input type="checkbox" id="autoInfo" checked> 曲情報を自動収集</label></div>
-
     <h2>ライブラリから選ぶ</h2>
     <input id="q" placeholder="曲名・アーティストで検索（/ で移動、Enterで決定）" style="width:100%" enterkeyhint="go" autocomplete="off" autocapitalize="off" spellcheck="false">
     <div class="search-res" id="sres"></div>
+    <details class="info" id="info" open><summary>この曲について</summary><div id="infoBody" class="muted">—</div></details>
 
     <details class="side" id="dWeights" open><summary><h2>重み付け</h2></summary>
     <div class="sl"><span>自分の流れ</span><input type="range" min="0" max="5" step="0.5" id="wFlow" value="3"><span></span></div>
@@ -266,9 +259,8 @@
     <div id="tagListBox"></div>
     </details>
 
-    <details class="side" id="dHist" open><summary><h2>セット履歴</h2></summary>
+    <details class="side" id="dHist" open><summary><h2>セット履歴</h2> <button class="sm" id="btnExport">プレイリスト化</button> <button class="sm" id="btnClearHist">履歴をクリア</button></summary>
     <div class="hist" id="hist"><div class="muted">まだありません</div></div>
-    <div style="margin-top:8px;display:flex;gap:6px"><button class="sm" id="btnExport">プレイリスト化</button><button class="sm" id="btnClearHist">履歴をクリア</button></div>
     </details>
   </aside>
   <div id="split" role="separator" aria-orientation="vertical" tabindex="0" title="ドラッグで幅を変更（ダブルクリックで元に戻す）"></div>
@@ -643,7 +635,7 @@ const MODES={
   surprise:{label:"ジャンル越え", tip:"今の曲とジャンルが全く重ならない曲だけ（同じ・近いジャンルは出さない）。その中でBPM・キー・音の感じがつながる順。ムードタグは今の曲に近いものを保ち、対立するムードは下げる。🎲で入れ替え", m:{flow:0, co:0, bpm:1,key:1,gen:0, af:0,nov:0, rnd:.5,pop:0, eng:0, cross:2.5, snd:1, mood:1.2}},
   up:      {label:"上げる",       tip:"今よりエネルギーが少し高い曲（根拠タグ：Banger・Anthem・Big Drop 等も加点）", m:{flow:.5,  co:.5,  bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0,  pop:0, eng:3}},
   down:    {label:"落とす",       tip:"今よりエネルギーが少し低い曲（根拠タグ：Cool Down・Tool・Transition 等も加点）", m:{flow:.5,  co:.5,  bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0,  pop:0, eng:3}},
-  next:    {label:"次の時間帯へ", tip:"今の曲の時間帯タグ（Opener→Warm Up→Build Up→Peak Time→Closing→After Hours）の、次の時間帯のタグが付いた曲だけを段階順に出す。タグ無しは出さない（候補が空のときだけ参考表示）", m:{flow:.5, co:.5, bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0, pop:0, eng:0, slot:3}},
+  next:    {label:"次の時間帯へ", tip:"今の曲の時間帯タグ（Opener→Warm Up→Build Up→Peak Time→Closing→After Hours）の、次の時間帯のタグが付いた曲だけを段階順に出す。タグ無しは出さない", m:{flow:.5, co:.5, bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0, pop:0, eng:0, slot:3}},
 };
 const afOf=id=>S.meta[id]?.af||null;
 // リリース年: 集めた曲情報の初リリース（MusicBrainz）があれば優先（ベスト盤・再発のアルバム年に引っぱられないように）→ アルバムの年
@@ -796,7 +788,7 @@ function suggest(){
       if(good.length){ sc+=W.eng*.7; chips.push(["g", `${mode==="up"?"上げる":"落とす"}タグ #${good[0]}`]); }
       else if(bad.length){ sc+=W.eng*(-.5); chips.push(["r", `${mode==="up"?"落とす":"上げる"}タグ #${bad[0]}`]); }
     }
-    // 時間帯: 「次の時間帯へ」ではタグ付きだけを出す（タグ無しは候補が空のときの参考表示行き）。段階の近さが並びの主軸
+    // 時間帯: 「次の時間帯へ」ではタグ付きだけを出す（タグ無しは参考表示にも出さない）。段階の近さが並びの主軸
     if(W.slot && curSlot>=0){
       const ixs=tg.map(t=>TIME_TAGS.indexOf(t)).filter(i=>i>=0);
       if(ixs.length){ let bv=-Infinity, bi=-1;
@@ -817,7 +809,8 @@ function suggest(){
     // 国: 今の曲とアーティストの国が1つでも同じなら加点（候補のアーティスト名の横の国を緑に）
     let ccv=false; if(W.cc && curCc.length && countriesOf(id).some(c=>curCc.includes(c))){ sc+=W.cc; ccv=true; }
     if(fVenue && !venueMiss) chips.push(["g", `場所 ${fVenue}`]);
-    if(sc<=0 || noSlot || venueMiss){ weak.push({id,sc,chips,gst,yv,ccv,slotD}); continue; }
+    if(noSlot) continue;  // 「次の時間帯へ」ではタグ無しは参考表示にも出さない（ユーザー指定）
+    if(sc<=0 || venueMiss){ weak.push({id,sc,chips,gst,yv,ccv,slotD}); continue; }
     res.push({id,sc,chips,gst,yv,ccv,slotD});
   }
   for(const r of [...res,...weak]) r.pct=Math.max(0,Math.min(100,Math.round(r.sc/ideal*100)));
@@ -853,7 +846,7 @@ function renderDeck(force){
    <div class="bk"><input id="eBpm" placeholder="BPM" value="${m.bpm||""}"><input id="eKey" placeholder="キー 8A/Am" value="${m.key||""}"><button class="sm" id="saveMeta">保存</button><button class="sm" id="tap">TAP</button><button class="sm" data-p="${t.id}" title="Spotifyで再生">▶ 再生</button><button class="sm" data-c="${t.id}" title="曲名をコピー">⎘ コピー</button><button class="sm" data-lyr="${t.id}" title="曲名とアーティスト名で歌詞を検索（別のタブで開く。アプリでは歌詞を取得しない）">歌詞 ↗</button>${undo}<span class="muted" id="tapv"></span></div>
    <div class="tags" id="deckTags">${tagsOf(t.id).map(x=>`<span class="chip tag">#${esc(x)}<button data-deltag="${esc(x)}" title="外す">×</button></span>`).join("")}</div>
    <div class="bk rateRow" id="deckRate"><span class="muted">評価</span>${starsEdit(t.id,"data-rate")}<span class="muted kh" style="font-size:11px">1〜5キー</span></div>
-   <details class="tagPre" id="tagPre"${LS.get("tagPre",false)?" open":""}><summary>定番タグから選ぶ</summary>${[...TAG_PRESET, ...(origTags().length?[["オリジナル",origTags()]]:[])].map(([g,l])=>`<div class="tpg"><span class="muted">${g}</span>${l.map(x=>tagsOf(t.id).includes(x)?`<span class="chip tag g" data-deltag="${esc(x)}" title="外す">#${esc(x)}</span>`:`<span class="chip sug" data-addtag="${esc(x)}" title="このタグを付ける">＋${esc(x)}</span>`).join("")}</div>`).join("")}<div class="tpg"><span class="muted">追加</span><input id="tagIn" placeholder="＋タグ（T）" list="tagList" autocomplete="off"><datalist id="tagList">${[...new Set([...allTags(),...PRESET_ALL])].map(x=>`<option value="${esc(x)}">`).join("")}</datalist></div></details>`;
+   <details class="tagPre" id="tagPre"${LS.get("tagPre",false)?" open":""}><summary>TAG</summary>${[...TAG_PRESET, ...(origTags().length?[["オリジナル",origTags()]]:[])].map(([g,l])=>`<div class="tpg"><span class="muted">${g}</span>${l.map(x=>tagsOf(t.id).includes(x)?`<span class="chip tag g" data-deltag="${esc(x)}" title="外す">#${esc(x)}</span>`:`<span class="chip sug" data-addtag="${esc(x)}" title="このタグを付ける">＋${esc(x)}</span>`).join("")}</div>`).join("")}<div class="tpg"><span class="muted">追加</span><input id="tagIn" placeholder="＋タグ（T）" list="tagList" autocomplete="off"><datalist id="tagList">${[...new Set([...allTags(),...PRESET_ALL])].map(x=>`<option value="${esc(x)}">`).join("")}</datalist></div></details>`;
   $("#tagIn").onkeydown=e=>{ if(e.isComposing||e.keyCode===229) return;  // 日本語変換の確定Enterでは追加しない
     if(e.key==="Enter"){ e.preventDefault(); const v=e.target.value; if(cleanTag(v)){ addTag(t.id,v); setTimeout(()=>$("#tagIn")?.focus(),0); } } else if(e.key==="Escape"){ e.target.value=""; e.target.blur(); } };
   $("#tagPre").ontoggle=e=>LS.set("tagPre",e.target.open);
@@ -886,7 +879,7 @@ function subLine(id,lm,yv){ const t=S.tracks[id], a=S.meta[id]?.af; const p=[], 
   const yr=yearOf(id); if(t.dur) p.push(fmtDur(t.dur)); if(yr) p.push(yv?`<span class="yr ${yv[0]}" title="${yv[1]}（加点）">${yr}</span>`:yr); if(t.pop!=null) p.push("POP "+t.pop); const l=labelOf(id,lm); if(l) p.push(esc(cut(l,28)));
   if(a && (a.en!=null||a.da!=null||a.va!=null)){ const f=v=>v==null?"–":Math.round(v*100);
     q.push(`<span class="af" title="エネルギー / ダンス度 / 明るさ（0〜100）">E${f(a.en)} D${f(a.da)} V${f(a.va)}</span>`); }
-  return (p.length||q.length)?`<div class="sub">${[...p,...q].join(" · ")}</div>`:""; }
+  return (p.length?`<div class="sub">${p.join(" · ")}</div>`:"")+(q.length?`<div class="sub">${q.join(" · ")}</div>`:""); }
 let pressing=false; const deferred=new Set();
 function later(fn){ if(pressing){ deferred.add(fn); return true; } return false; }
 document.addEventListener("pointerdown",()=>{ pressing=true; },true);
@@ -1767,8 +1760,8 @@ $("#metaInBtn").onclick=()=>$("#metaIn").click();
 $("#metaIn").onchange=async e=>{ const f=e.target.files[0]; if(!f) return; Object.assign(S.meta, JSON.parse(await f.text())); await DB.set("meta",S.meta); toast("読み込みました"); refresh(); };
 $("#q").oninput=doSearch;
 $("#follow").onchange=e=>setFollow(e.target.checked);
-$("#btnExport").onclick=exportSet;
-$("#btnClearHist").onclick=()=>{ S.hist=[]; LS.set("hist",[]); refresh(); };
+$("#btnExport").onclick=e=>{ e.stopPropagation(); exportSet(); };
+$("#btnClearHist").onclick=e=>{ e.stopPropagation(); S.hist=[]; LS.set("hist",[]); refresh(); };
 ["wFlow","wCo","wBpm","wKey","wGen","wYear","wCc"].forEach(id=>{ const el=$("#"+id); const sp=el.nextElementSibling; el.value=LS.get(id,el.value); sp.textContent=el.value;
   el.oninput=()=>{ sp.textContent=el.value; LS.set(id,el.value); renderCands(); }; });
 ["fBpm","fKey","fArtist","fHalf"].forEach(id=>$("#"+id).onchange=renderCands);
