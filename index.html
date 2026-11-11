@@ -98,7 +98,7 @@
   .chip.y{color:var(--accent2);border-color:#4a412c}
   .chip.r{color:var(--warn);border-color:#4a2c2c}
   .chip.tag{color:#c9b8ff;border-color:#3d3560}
-  .tags{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-top:8px}
+  .tags{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-top:6px}
   #tagPop{position:fixed;z-index:60;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;box-shadow:0 8px 28px rgba(0,0,0,.55);max-height:70vh;overflow:auto;font-size:12px}
   #tagPop .tph{display:flex;justify-content:space-between;align-items:center;gap:8px} #tagPop .tags{margin-top:6px} #tagPop .chip{cursor:pointer}
   #tagPop .tpg{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-top:5px} #tagPop .tpg>.muted{width:44px;flex:none}
@@ -107,8 +107,8 @@
   .stars .st.on{color:#f5c542;opacity:1} .stars .st:hover{transform:scale(1.15)}
   .rateRow{display:flex;align-items:center;gap:8px;margin:4px 0} .cstars{margin-left:6px;vertical-align:-1px} .cstars .st{font-size:13px;padding:0 1px}
   @media (max-width:760px){ .stars .st{font-size:24px;padding:0 4px} .cstars .st{font-size:18px;padding:0 3px} .rateRow .kh{display:none} }
-  .tagPre{margin-top:6px;font-size:12px} .tagPre summary{cursor:pointer;color:var(--dim)} .tagPre .tpg{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-top:5px}
-  .tagPre .tpg>.muted{width:44px;flex:none} .tagPre .chip{cursor:pointer}
+  .tagPre{margin-top:4px;font-size:12px} .tagPre summary{cursor:pointer;color:var(--dim)} .tagPre .tpg{display:flex;gap:3px;flex-wrap:wrap;align-items:center;margin-top:3px}
+  .tagPre .tpg>.muted{width:38px;flex:none;font-size:11px} .tagPre .chip{cursor:pointer;font-size:11px;padding:0 6px;line-height:1.7}
   .tags .chip{font-size:12px;padding:1px 8px}
   .tags .chip button{background:none;border:0;color:inherit;cursor:pointer;padding:0 0 0 4px;font-size:12px}
   .tags input{width:9em;font-size:12px;padding:3px 6px}
@@ -138,14 +138,6 @@
   .dual input::-moz-range-track{background:none} .dual input::-moz-range-thumb{pointer-events:auto;width:12px;height:12px;border-radius:50%;background:var(--accent);border:2px solid var(--bg);cursor:pointer}
   img[src=""]{visibility:hidden}
   .cand.sel{background:#16201d;outline:1px solid #2c4a41}
-  /* 広い画面では候補を2列にして横幅を使う（BPM・キーの数値列はチップと重複するので畳む） */
-  @media (min-width:1150px){
-    #cands{display:grid;grid-template-columns:1fr 1fr;column-gap:20px;align-items:start}
-    #cands>.empty,#cands>.more{grid-column:1/-1}
-    #cands .cand{grid-template-columns:30px 40px 1fr auto;gap:8px}
-    #cands .cand .meta{display:none}
-    #cands .cand img{width:40px;height:40px}
-  }
   body.dj [data-q], body.dj [data-p]{display:none}
   [data-c]{font-family:var(--mono)}
   .info{margin-top:10px;font-size:12px}
@@ -853,7 +845,7 @@ function renderDeck(force){
   $("#deck").innerHTML=`<div class="row"><img src="${esc(t.img)}" alt=""><div><div class="t">${esc(t.name)}${t.na?` <span class="na" title="Spotifyで再生できない曲（配信停止・地域制限など）。候補には出しません">リンク切れ</span>`:""}</div><div class="a">${esc(arts(t))}${ccSpan(t.id)}</div>${(()=>{ const gl=genreList(t.id,labelMap()); return gl.length?`<div class="gps">${gl.slice(0,4).map(x=>genrePill(x,true)).join("")}</div>`:""; })()}<div class="muted">${esc(t.album)} ${t.year||""}</div></div>${side}</div>
    <div class="bk"><span class="big">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="muted">BPM</span><span class="big k">${m.key||"—"}</span><span class="muted">${m.genre?esc(m.genre):""} ${m.src?"("+(SRC_LABEL[m.src]||m.src)+(m.kSrc&&m.kSrc!==m.src?" / キー: "+(SRC_LABEL[m.kSrc]||m.kSrc):"")+(m.bSrc&&m.bSrc!==m.src?" / BPM: "+(SRC_LABEL[m.bSrc]||m.bSrc):"")+")":""}${m.src==="rekordbox"&&m.rbName&&norm(m.rbName)!==norm(t.name)?` <span class="muted" title="rekordbox のこの曲と照合しました">← rekordbox「${esc(m.rbName)}」</span>`:""}</span></div>
    <div class="bk"><input id="eBpm" placeholder="BPM" value="${m.bpm||""}"><input id="eKey" placeholder="キー 8A/Am" value="${m.key||""}"><button class="sm" id="saveMeta">保存</button><button class="sm" id="tap">TAP</button><button class="sm" data-p="${t.id}" title="Spotifyで再生">▶ 再生</button><button class="sm" data-c="${t.id}" title="曲名をコピー">⎘ コピー</button><button class="sm" data-lyr="${t.id}" title="曲名とアーティスト名で歌詞を検索（別のタブで開く。アプリでは歌詞を取得しない）">歌詞 ↗</button>${undo}<span class="muted" id="tapv"></span></div>
-   <div class="tags" id="deckTags">${tagsOf(t.id).map(x=>`<span class="chip tag">#${esc(x)}<button data-deltag="${esc(x)}" title="外す">×</button></span>`).join("")}<input id="tagIn" placeholder="＋タグ（T）" list="tagList" autocomplete="off"><datalist id="tagList">${[...new Set([...allTags(),...PRESET_ALL])].map(x=>`<option value="${esc(x)}">`).join("")}</datalist>${allTags().filter(x=>!tagsOf(t.id).includes(x)).slice(0,6).map(x=>`<span class="chip sug" data-addtag="${esc(x)}" title="このタグを付ける">＋${esc(x)}</span>`).join("")}</div>
+   <div class="tags" id="deckTags">${tagsOf(t.id).map(x=>`<span class="chip tag">#${esc(x)}<button data-deltag="${esc(x)}" title="外す">×</button></span>`).join("")}<input id="tagIn" placeholder="＋タグ（T）" list="tagList" autocomplete="off"><datalist id="tagList">${[...new Set([...allTags(),...PRESET_ALL])].map(x=>`<option value="${esc(x)}">`).join("")}</datalist></div>
    <div class="bk rateRow" id="deckRate"><span class="muted">評価</span>${starsEdit(t.id,"data-rate")}<span class="muted kh" style="font-size:11px">1〜5キー</span></div>
    <details class="tagPre" id="tagPre"${LS.get("tagPre",false)?" open":""}><summary>定番タグから選ぶ</summary>${TAG_PRESET.map(([g,l])=>`<div class="tpg"><span class="muted">${g}</span>${l.map(x=>tagsOf(t.id).includes(x)?`<span class="chip tag g" data-deltag="${esc(x)}" title="外す">#${esc(x)}</span>`:`<span class="chip sug" data-addtag="${esc(x)}" title="このタグを付ける">＋${esc(x)}</span>`).join("")}</div>`).join("")}</details>`;
   $("#tagIn").onkeydown=e=>{ if(e.isComposing||e.keyCode===229) return;  // 日本語変換の確定Enterでは追加しない
