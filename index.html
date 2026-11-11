@@ -48,7 +48,10 @@
   h2{font:600 11px var(--mono);letter-spacing:.15em;color:var(--dim);margin:18px 0 8px;text-transform:uppercase}
   h2:first-child{margin-top:0}
   .deck{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
-  .deck .row{display:flex;gap:10px;align-items:center}
+  .deck .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .deck .dside{margin-left:auto;text-align:right;font-size:12px;display:flex;flex-direction:column;gap:3px;align-items:flex-end;min-width:0}
+  .deck .dside a{color:var(--accent);text-decoration:none}
+  .deck .dside .pl{color:var(--dim);max-width:320px}
   .deck img{width:64px;height:64px;border-radius:4px;object-fit:cover;background:#222}
   .deck .t{font-weight:600;font-size:14px}
   .deck .a{color:var(--dim)}
@@ -135,6 +138,14 @@
   .dual input::-moz-range-track{background:none} .dual input::-moz-range-thumb{pointer-events:auto;width:12px;height:12px;border-radius:50%;background:var(--accent);border:2px solid var(--bg);cursor:pointer}
   img[src=""]{visibility:hidden}
   .cand.sel{background:#16201d;outline:1px solid #2c4a41}
+  /* 広い画面では候補を2列にして横幅を使う（BPM・キーの数値列はチップと重複するので畳む） */
+  @media (min-width:1150px){
+    #cands{display:grid;grid-template-columns:1fr 1fr;column-gap:20px;align-items:start}
+    #cands>.empty,#cands>.more{grid-column:1/-1}
+    #cands .cand{grid-template-columns:30px 40px 1fr auto;gap:8px}
+    #cands .cand .meta{display:none}
+    #cands .cand img{width:40px;height:40px}
+  }
   body.dj [data-q], body.dj [data-p]{display:none}
   [data-c]{font-family:var(--mono)}
   .info{margin-top:10px;font-size:12px}
@@ -278,6 +289,7 @@
         <b id="popVal">すべて</b></span>
       <label class="ck" hidden title="アーティストの国（MusicBrainz）で候補を絞る。絞り込み中は国が分からない曲を出さない">国 <select id="fCc"></select></label>
       <label class="ck" hidden title="このタグの曲だけ候補に出す">タグ <select id="fTag"></select></label>
+      <label class="ck" title="今夜の場所（前提フィルタ）。選ぶと全モードで、その場所タグが付いた曲だけを候補に出す。付いた曲が無ければ参考表示に回す">場所 <select id="fVenue"></select></label>
       <label class="ck">コピー内容
         <select id="copyMode"><option value="title">曲名のみ</option><option value="both">曲名＋アーティスト</option><option value="artist">アーティストのみ</option></select>
       </label>
@@ -629,7 +641,7 @@ function genOf(id){ return (S.meta[id]?.genre||"").toLowerCase().split(/[\/,;]/)
 const MODES={
   flow:    {label:"いつもの流れ", tip:"自分のプレイリストで並べた順を重視",                      m:{flow:1,   co:1,   bpm:1,key:1,gen:1,  af:0, nov:0, rnd:0,  pop:0, eng:0}},
   similar: {label:"似た曲",       tip:"音の特徴（エネルギー・ダンス度・明るさ・生音っぽさ・インスト度・ボーカル量・音量をライブラリ内で比較）とジャンルから見て雰囲気が近い曲",            m:{flow:.3,  co:.6,  bpm:1,key:1,gen:1.5,af:3, nov:0, rnd:0,  pop:0, eng:0}},
-  surprise:{label:"ジャンル越え", tip:"今の曲とジャンルが全く重ならない曲だけ（同じ・近いジャンルは出さない）。その中でBPM・キー・音の感じがつながる順。🎲で入れ替え", m:{flow:0, co:0, bpm:1,key:1,gen:0, af:0,nov:0, rnd:.5,pop:0, eng:0, cross:2.5, snd:1}},
+  surprise:{label:"ジャンル越え", tip:"今の曲とジャンルが全く重ならない曲だけ（同じ・近いジャンルは出さない）。その中でBPM・キー・音の感じがつながる順。ムードタグは今の曲に近いものを保ち、対立するムードは下げる。🎲で入れ替え", m:{flow:0, co:0, bpm:1,key:1,gen:0, af:0,nov:0, rnd:.5,pop:0, eng:0, cross:2.5, snd:1, mood:1.2}},
   up:      {label:"上げる",       tip:"今よりエネルギーが少し高い曲（根拠タグ：Banger・Anthem・Big Drop 等も加点）", m:{flow:.5,  co:.5,  bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0,  pop:0, eng:3}},
   down:    {label:"落とす",       tip:"今よりエネルギーが少し低い曲（根拠タグ：Cool Down・Tool・Transition 等も加点）", m:{flow:.5,  co:.5,  bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0,  pop:0, eng:3}},
   next:    {label:"次の時間帯へ", tip:"今の曲の時間帯タグ（Opener→Warm Up→Build Up→Peak Time→Closing→After Hours）の、次の時間帯のタグが付いた曲だけを段階順に出す。タグ無しは出さない（候補が空のときだけ参考表示）", m:{flow:.5, co:.5, bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0, pop:0, eng:0, slot:3}},
@@ -728,22 +740,23 @@ function suggest(){
   const lm=labelMap(), vctx={curAf, st:(M.af||M.snd)?afStats():{}, lm, curG:genreSet(cur,lm), curMood:moodOf(cur), mood:mode==="similar"};
   const fB=+$("#fBpm").value, fK=$("#fKey").checked, fA=$("#fArtist").checked, half=$("#fHalf").checked;
   const [pMin,pMax]=popRange(), fPop=pMin>0||pMax<100;  // POPの範囲（人気度が分からない曲は絞り込み中は出さない）
-  const W={flow:w("wFlow")*M.flow,co:w("wCo")*M.co,bpm:w("wBpm")*M.bpm,key:w("wKey")*M.key,gen:w("wGen")*M.gen,year:w("wYear")*(M.year??1),cc:w("wCc")*(M.cc??1),af:M.af,nov:M.nov,rnd:M.rnd,pop:M.pop,eng:M.eng,cross:M.cross||0,snd:M.snd||0,slot:M.slot||0};
+  const W={flow:w("wFlow")*M.flow,co:w("wCo")*M.co,bpm:w("wBpm")*M.bpm,key:w("wKey")*M.key,gen:w("wGen")*M.gen,year:w("wYear")*(M.year??1),cc:w("wCc")*(M.cc??1),af:M.af,nov:M.nov,rnd:M.rnd,pop:M.pop,eng:M.eng,cross:M.cross||0,snd:M.snd||0,slot:M.slot||0,mood:M.mood||0};
   const seed=cur+":"+(S.seed||0);
   // 点数の表示用: 全部の条件が満点のときの合計（1位を100にすると、BPMとキーが合うだけの曲も100に見えてしまうため）
   const fCc=LS.get("fCc",""), curCc=countriesOf(cur);
-  const curTags=tagsOf(cur), fTag=LS.get("fTag",""), TAG_W=1.5;  // 今の曲と同じタグ1つにつき +1.5（2つまで）
+  const curTags=tagsOf(cur), fTag=LS.get("fTag",""), fVenue=LS.get("fVenue",""), TAG_W=1.5;  // 今の曲と同じタグ1つにつき +1.5（2つまで）
   // 時間帯の段階: Now に無ければ履歴を新しい順にさかのぼり、時間帯タグが付いた直近の曲で決める
   let curSlot=slotOf(curTags);
   if(curSlot<0){ for(let i=S.hist.length-1;i>=0;i--){ const s=slotOf(tagsOf(S.hist[i])); if(s>=0){ curSlot=s; break; } } }
   const curYear=yearOf(cur);
-  const ideal=Math.max(1, [W.flow,W.co,W.bpm,W.key,W.gen,W.year,curCc.length?W.cc:0].reduce((x,v)=>x+Math.max(0,v),0)+(W.af>0?W.af*1.2:0)+W.nov+W.rnd+W.pop*.6+W.eng+W.cross+W.snd*1.2+(curTags.length?TAG_W*Math.min(2,curTags.length):0)+W.slot);
+  const ideal=Math.max(1, [W.flow,W.co,W.bpm,W.key,W.gen,W.year,curCc.length?W.cc:0].reduce((x,v)=>x+Math.max(0,v),0)+(W.af>0?W.af*1.2:0)+W.nov+W.rnd+W.pop*.6+W.eng+W.cross+W.snd*1.2+(W.mood||0)*1.05+(curTags.length?TAG_W*Math.min(2,curTags.length):0)+W.slot);
   const pool = new Set([...Object.keys(S.occ), ...S.saved]);
   const res=[], weak=[];
   for(const id of pool){
     if(played.has(id)) continue; const t=S.tracks[id]; if(!t || t.na) continue;
     if(fPop && (t.pop==null || t.pop<pMin || t.pop>pMax)) continue;
     const tg=tagsOf(id); if(fTag && !tg.includes(fTag)) continue; if(fCc && !ccMatch(id,fCc,curCc)) continue; let yv=null;
+    const venueMiss=fVenue && !tg.includes(fVenue);  // 場所の前提に合わない曲は候補から外す（候補が空なら参考表示行き）
     const sameArt = t.artists.some(a=>curArt.has(a.id));
     if(fA && sameArt) continue;
     const chips=[]; let sc=0, slotD=null, noSlot=false;
@@ -767,6 +780,9 @@ function suggest(){
     // 全く重ならない曲だけ、ジャンル地図で遠いほど加点（地図に無ければ中くらい）。ジャンル不明の曲は下のほうへ。音の感じが近いほど加点
     if(W.cross && vctx.curG.size){ if(gs==null) sc-=W.cross*.6; else if(gs>0) continue; else { const v=md==null?.6:Math.max(.3,Math.min(1,(md-GM_NEAR)/.9)); sc+=W.cross*v; gst=[v>=.6?"g":"y",v>=.9?"ジャンル越え（遠い）":"ジャンル越え"]; } }
     if(W.snd){ const sd=afSim(curAf,afOf(id),vctx.st); if(sd!=null){ sc+=W.snd*(sd-.4)*2; if(sd>=.55) chips.push([sd>=.7?"g":"y",`音の感じ ${Math.round(sd*100)}%`]); } }
+    // ジャンル越えでのムード保存: ジャンルは遠くても、ムードタグが近い曲を保ち、対立するムードは下げる（ムードタグが無い曲は対象外）
+    if(W.mood){ const ms=moodSim(vctx.curMood,moodOf(id)); if(ms!=null){ sc+=W.mood*(ms-.3)*1.5;
+      if(ms>=1) chips.push(["g","ムード一致"]); else if(ms>=.6) chips.push(["y","ムード近し"]); else if(ms===0) chips.push(["r","ムード対立"]); } }
     if(gs!=null && W.gen){ if(gs>0){ sc+=W.gen*gs; if(!gst){ const hh=genreHit(vctx.curG,gSet); gst=[gs>=1?"g":"y", gs>=1?"同じジャンル":"近いジャンル", hh?`重なり: ${hh}`:"ジャンル地図で近い"]; } } else { sc-=W.gen*2; if(!gst) gst=["r","ジャンル違い"]; } }
     const af=afOf(id);
     if(W.af){ const vb=vibe(cur,id,vctx); if(vb){ sc+=W.af*(vb.v-.4)*2; if(W.af>=1 && vb.v>=.55) chips.push([vb.v>=.7?"g":"y",`雰囲気 ${Math.round(vb.v*100)}%${vb.why.length?"（"+vb.why.join("・")+"）":""}`]); } }
@@ -801,7 +817,8 @@ function suggest(){
     if(tg.length){ const sh=tg.filter(x=>curTags.includes(x)); sc+=TAG_W*Math.min(2,sh.length); for(const x of tg) chips.push(["tag"+(sh.includes(x)?" g":""),"#"+x]); }
     // 国: 今の曲とアーティストの国が1つでも同じなら加点（候補のアーティスト名の横の国を緑に）
     let ccv=false; if(W.cc && curCc.length && countriesOf(id).some(c=>curCc.includes(c))){ sc+=W.cc; ccv=true; }
-    if(sc<=0 || noSlot){ weak.push({id,sc,chips,gst,yv,ccv,slotD}); continue; }
+    if(fVenue && !venueMiss) chips.push(["g", `場所 ${fVenue}`]);
+    if(sc<=0 || noSlot || venueMiss){ weak.push({id,sc,chips,gst,yv,ccv,slotD}); continue; }
     res.push({id,sc,chips,gst,yv,ccv,slotD});
   }
   for(const r of [...res,...weak]) r.pct=Math.max(0,Math.min(100,Math.round(r.sc/ideal*100)));
@@ -828,9 +845,12 @@ function renderDeck(force){
   const t=S.tracks[S.now];
   if(!t){ $("#deck").innerHTML=`<div class="muted">曲が未選択です。下の検索か、Spotifyの再生追従で選んでください。</div>`; $("#mobileNow").innerHTML=`<b>NOW</b><span class="muted">未選択</span>`; return; }
   const m=S.meta[t.id]||{};
+  const pls=[...new Set((S.occ[t.id]||[]).map(([pi])=>S.playlists[pi]?.name).filter(Boolean))];
+  const aff=m.af, fv2=v=>v==null?"–":Math.round(v*100);
+  const side=`<div class="dside">${pls.length?`<div class="pl" title="${esc(pls.join("、"))}">収録 ${pls.length} PL：${esc(cut(pls.join("、"),42))}</div>`:""}${aff&&(aff.en!=null||aff.da!=null)?`<div class="muted" title="エネルギー / ダンス度 / 明るさ（0〜100）">E${fv2(aff.en)} D${fv2(aff.da)} V${fv2(aff.va)}</div>`:""}<div><a href="https://open.spotify.com/track/${esc(t.id)}" target="_blank" rel="noopener">Spotify で開く ↗</a></div></div>`;
   const undo=S.hist.length?`<button class="sm" data-undo title="ひとつ前のNowに戻す（U）">↶ 戻す</button>`:"";
   $("#mobileNow").innerHTML=`<b>NOW</b>${esc(t.name)} <span class="muted">— ${esc(arts(t))}</span><span class="m">${m.bpm?m.bpm.toFixed(1):"—"} ${m.key||""}</span>${undo?" "+undo:""}`;
-  $("#deck").innerHTML=`<div class="row"><img src="${esc(t.img)}" alt=""><div><div class="t">${esc(t.name)}${t.na?` <span class="na" title="Spotifyで再生できない曲（配信停止・地域制限など）。候補には出しません">リンク切れ</span>`:""}</div><div class="a">${esc(arts(t))}${ccSpan(t.id)}</div>${(()=>{ const gl=genreList(t.id,labelMap()); return gl.length?`<div class="gps">${gl.slice(0,4).map(x=>genrePill(x,true)).join("")}</div>`:""; })()}<div class="muted">${esc(t.album)} ${t.year||""}</div></div></div>
+  $("#deck").innerHTML=`<div class="row"><img src="${esc(t.img)}" alt=""><div><div class="t">${esc(t.name)}${t.na?` <span class="na" title="Spotifyで再生できない曲（配信停止・地域制限など）。候補には出しません">リンク切れ</span>`:""}</div><div class="a">${esc(arts(t))}${ccSpan(t.id)}</div>${(()=>{ const gl=genreList(t.id,labelMap()); return gl.length?`<div class="gps">${gl.slice(0,4).map(x=>genrePill(x,true)).join("")}</div>`:""; })()}<div class="muted">${esc(t.album)} ${t.year||""}</div></div>${side}</div>
    <div class="bk"><span class="big">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="muted">BPM</span><span class="big k">${m.key||"—"}</span><span class="muted">${m.genre?esc(m.genre):""} ${m.src?"("+(SRC_LABEL[m.src]||m.src)+(m.kSrc&&m.kSrc!==m.src?" / キー: "+(SRC_LABEL[m.kSrc]||m.kSrc):"")+(m.bSrc&&m.bSrc!==m.src?" / BPM: "+(SRC_LABEL[m.bSrc]||m.bSrc):"")+")":""}${m.src==="rekordbox"&&m.rbName&&norm(m.rbName)!==norm(t.name)?` <span class="muted" title="rekordbox のこの曲と照合しました">← rekordbox「${esc(m.rbName)}」</span>`:""}</span></div>
    <div class="bk"><input id="eBpm" placeholder="BPM" value="${m.bpm||""}"><input id="eKey" placeholder="キー 8A/Am" value="${m.key||""}"><button class="sm" id="saveMeta">保存</button><button class="sm" id="tap">TAP</button><button class="sm" data-p="${t.id}" title="Spotifyで再生">▶ 再生</button><button class="sm" data-c="${t.id}" title="曲名をコピー">⎘ コピー</button><button class="sm" data-lyr="${t.id}" title="曲名とアーティスト名で歌詞を検索（別のタブで開く。アプリでは歌詞を取得しない）">歌詞 ↗</button>${undo}<span class="muted" id="tapv"></span></div>
    <div class="tags" id="deckTags">${tagsOf(t.id).map(x=>`<span class="chip tag">#${esc(x)}<button data-deltag="${esc(x)}" title="外す">×</button></span>`).join("")}<input id="tagIn" placeholder="＋タグ（T）" list="tagList" autocomplete="off"><datalist id="tagList">${[...new Set([...allTags(),...PRESET_ALL])].map(x=>`<option value="${esc(x)}">`).join("")}</datalist>${allTags().filter(x=>!tagsOf(t.id).includes(x)).slice(0,6).map(x=>`<span class="chip sug" data-addtag="${esc(x)}" title="このタグを付ける">＋${esc(x)}</span>`).join("")}</div>
@@ -882,7 +902,7 @@ function renderCands(keepSel){
   if(later(()=>renderCands(true))) return;
   if(!keepSel) sel=0;
   // Now・選び方・絞り込みが変わったときだけ60曲に戻す（裏での描き直しでは戻さない）
-  const ck=[S.now,LS.get("mode","flow"),$("#fBpm").value,$("#fKey").checked,$("#fArtist").checked,$("#fHalf").checked,LS.get("fTag",""),LS.get("fCc",""),popRange().join("-")].join("|");
+  const ck=[S.now,LS.get("mode","flow"),$("#fBpm").value,$("#fKey").checked,$("#fArtist").checked,$("#fHalf").checked,LS.get("fTag",""),LS.get("fCc",""),LS.get("fVenue",""),popRange().join("-")].join("|");
   if(ck!==candCtx){ candCtx=ck; candLimit=60; candHold=false; }
   const list=suggest();
   if(candHold && candOrder){ const pos=new Map(candOrder.map((id,i)=>[id,i])); list.sort((a,b)=>(pos.get(a.id)??1e9)-(pos.get(b.id)??1e9)); }
@@ -921,6 +941,7 @@ const UP_TAGS=["Banger","Anthem","Crowd Pleaser","Big Drop","Euphoric","Hard","P
 const DOWN_TAGS=["Cool Down","Tool","Transition","Chill","Deep","Closing","After Hours"]; // 落とす根拠タグ
 const slotOf=tg=>{ const ix=tg.map(t=>TIME_TAGS.indexOf(t)).filter(i=>i>=0); return ix.length?Math.min(...ix):-1; };  // タグ一覧→時間帯の段階（無ければ -1）
 const MOOD_TAGS=TAG_PRESET[3][1];  // ムードタグ（Dark/Groovy/Euphoric/Emotional/Chill/Funky/Hard/Deep）
+const VENUE_TAGS=(TAG_PRESET.find(g=>g[0]==="場所")||[])[1]||[];  // 場所タグ（前提フィルタ用）
 const MOOD_NEAR=[["Groovy","Funky"],["Euphoric","Uplifting"]]; // 近いムード
 const MOOD_OPP=[["Chill","Hard"],["Dark","Euphoric"]]; // 対立するムード
 const moodOf=id=>tagsOf(id).filter(t=>MOOD_TAGS.includes(t));
@@ -977,7 +998,8 @@ document.addEventListener("keydown",e=>{ if(e.key==="Escape" && tagPopId){ close
 window.addEventListener("resize",()=>placeTagPop());
 function renderTagFilter(){ renderTagList(); const el=$("#fTag"); if(!el) return; const cur=LS.get("fTag",""), all=allTags();
   el.innerHTML=`<option value="">すべて</option>`+all.map(t=>`<option${t===cur?" selected":""}>${esc(t)}</option>`).join("")+(cur&&!all.includes(cur)?`<option selected>${esc(cur)}</option>`:"");
-  el.closest("label").hidden=!all.length && !cur; }
+  el.closest("label").hidden=!all.length && !cur;
+  const ve=$("#fVenue"); if(ve){ const vc=LS.get("fVenue",""); ve.innerHTML=`<option value="">指定なし</option>`+VENUE_TAGS.map(t=>`<option${t===vc?" selected":""}>${esc(t)}</option>`).join(""); } }
 function refresh(){ renderDeck(); renderHist(); renderCands(); renderInfo(); if($("#dTagList")?.open) renderTagList(); }
 
 function setNow(id, push=true){
@@ -1761,6 +1783,7 @@ for(const id of ["popMin","popMax"]){ const el=$("#"+id);
   el.onchange=()=>{ LS.set("popMin",+$("#popMin").value); LS.set("popMax",+$("#popMax").value); renderCands(); }; }
 $(".dual").ondblclick=()=>{ $("#popMin").value=0; $("#popMax").value=100; popShow(); LS.set("popMin",0); LS.set("popMax",100); renderCands(); };
 $("#fTag").onchange=e=>{ LS.set("fTag",e.target.value); renderCands(); };
+$("#fVenue").onchange=e=>{ LS.set("fVenue",e.target.value); renderCands(); };
 $("#fCc").onchange=e=>{ LS.set("fCc",e.target.value); renderCands(); };
 $("#tagListBox").onclick=e=>{ const c=e.target.closest("[data-tlt]"), r=e.target.closest("[data-tln]");
   if(c){ LS.set("tagListTag",c.dataset.tlt); renderTagList(); } else if(r){ setNow(r.dataset.tln); } };
