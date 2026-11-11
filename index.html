@@ -632,7 +632,7 @@ const MODES={
   surprise:{label:"ジャンル越え", tip:"今の曲とジャンルが全く重ならない曲だけ（同じ・近いジャンルは出さない）。その中でBPM・キー・音の感じがつながる順。🎲で入れ替え", m:{flow:0, co:0, bpm:1,key:1,gen:0, af:0,nov:0, rnd:.5,pop:0, eng:0, cross:2.5, snd:1}},
   up:      {label:"上げる",       tip:"今よりエネルギーが少し高い曲（根拠タグ：Banger・Anthem・Big Drop 等も加点）", m:{flow:.5,  co:.5,  bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0,  pop:0, eng:3}},
   down:    {label:"落とす",       tip:"今よりエネルギーが少し低い曲（根拠タグ：Cool Down・Tool・Transition 等も加点）", m:{flow:.5,  co:.5,  bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0,  pop:0, eng:3}},
-  next:    {label:"次の時間帯へ", tip:"今の曲の時間帯タグ（Opener→Warm Up→Build Up→Peak Time→Closing→After Hours）の、次の時間帯のタグが付いた曲を重視", m:{flow:.5, co:.5, bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0, pop:0, eng:0, slot:3}},
+  next:    {label:"次の時間帯へ", tip:"今の曲の時間帯タグ（Opener→Warm Up→Build Up→Peak Time→Closing→After Hours）の、次の時間帯のタグが付いた曲だけを段階順に出す。タグ無しは出さない（候補が空のときだけ参考表示）", m:{flow:.5, co:.5, bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0, pop:0, eng:0, slot:3}},
 };
 const afOf=id=>S.meta[id]?.af||null;
 // リリース年: 集めた曲情報の初リリース（MusicBrainz）があれば優先（ベスト盤・再発のアルバム年に引っぱられないように）→ アルバムの年
@@ -746,7 +746,7 @@ function suggest(){
     const tg=tagsOf(id); if(fTag && !tg.includes(fTag)) continue; if(fCc && !ccMatch(id,fCc,curCc)) continue; let yv=null;
     const sameArt = t.artists.some(a=>curArt.has(a.id));
     if(fA && sameArt) continue;
-    const chips=[]; let sc=0;
+    const chips=[]; let sc=0, slotD=null, noSlot=false;
     if(flow[id]){ const v=Math.min(1,flow[id]/2); sc+=W.flow*v; chips.push([W.flow<0?"":"g", flow[id]>=1?`直後に置いた×${Math.round(flow[id])}`:"直前に置いた"]); }
     if(co[id]){ const v=1-Math.exp(-co[id]*1.2); sc+=W.co*v; const n=(S.occ[id]||[]).filter(([pi])=>S.occ[cur].some(([pj])=>pj===pi)).length; chips.push(["", `同じPL×${n}`]); }
     if(W.nov && !flow[id]){ const v=co[id]?.3:1; sc+=W.nov*v; if(v===1) chips.push(["g","初めての組み合わせ"]); }
@@ -781,17 +781,17 @@ function suggest(){
       if(good.length){ sc+=W.eng*.7; chips.push(["g", `${mode==="up"?"上げる":"落とす"}タグ #${good[0]}`]); }
       else if(bad.length){ sc+=W.eng*(-.5); chips.push(["r", `${mode==="up"?"落とす":"上げる"}タグ #${bad[0]}`]); }
     }
-    // 時間帯: 次の段階のタグが付いた曲を重視（同段階は弱く、2つ先は中間、それより先は小さく、戻る段階は減点。After Hours の次は同段階＝継続）
+    // 時間帯: 「次の時間帯へ」ではタグ付きだけを出す（タグ無しは候補が空のときの参考表示行き）。段階の近さが並びの主軸
     if(W.slot && curSlot>=0){
       const ixs=tg.map(t=>TIME_TAGS.indexOf(t)).filter(i=>i>=0);
       if(ixs.length){ let bv=-Infinity, bi=-1;
         for(const i of ixs){ const d=i-curSlot, v=d===1?1:d===0?.35:d===2?.5:d>2?.25:-.4; if(v>bv){ bv=v; bi=i; } }
-        sc+=W.slot*bv; const d=bi-curSlot;
+        sc+=W.slot*bv; const d=bi-curSlot; slotD=d;
         if(d===1) chips.push(["g", `次の時間帯 ${TIME_TAGS[bi]}`]);
         else if(d===0) chips.push(["y", `時間帯 ${TIME_TAGS[bi]}`]);
         else if(d>1) chips.push(["y", `時間帯 ${TIME_TAGS[bi]}（先）`]);
         else chips.push(["r", `時間帯 ${TIME_TAGS[bi]}（戻る）`]);
-      }
+      } else noSlot=true;
     }
     if(W.pop && t.pop!=null){ sc+=W.pop*(1-t.pop/100)*.6; if(t.pop<30) chips.push(["y","隠れた曲"]); }
     if(W.rnd) sc+=W.rnd*rnd01(seed+id);
@@ -801,11 +801,12 @@ function suggest(){
     if(tg.length){ const sh=tg.filter(x=>curTags.includes(x)); sc+=TAG_W*Math.min(2,sh.length); for(const x of tg) chips.push(["tag"+(sh.includes(x)?" g":""),"#"+x]); }
     // 国: 今の曲とアーティストの国が1つでも同じなら加点（候補のアーティスト名の横の国を緑に）
     let ccv=false; if(W.cc && curCc.length && countriesOf(id).some(c=>curCc.includes(c))){ sc+=W.cc; ccv=true; }
-    if(sc<=0){ weak.push({id,sc,chips,gst,yv,ccv}); continue; }
-    res.push({id,sc,chips,gst,yv,ccv});
+    if(sc<=0 || noSlot){ weak.push({id,sc,chips,gst,yv,ccv,slotD}); continue; }
+    res.push({id,sc,chips,gst,yv,ccv,slotD});
   }
   for(const r of [...res,...weak]) r.pct=Math.max(0,Math.min(100,Math.round(r.sc/ideal*100)));
-  res.sort((a,b)=>b.sc-a.sc);
+  if(mode==="next" && curSlot>=0){ const tier=r=>r.slotD==null?4:r.slotD===1?0:r.slotD===2?1:r.slotD===0?2:3; res.sort((a,b)=>tier(a)-tier(b)||b.sc-a.sc); }
+  else res.sort((a,b)=>b.sc-a.sc);
   // 今の曲に手がかり（BPM・キー・PL・音）が少なくて1曲も残らないときは、点の高い順に参考として出す
   if(!res.length && weak.length){ weak.sort((a,b)=>b.sc-a.sc); weak.weak=true; return weak; }
   return res;
