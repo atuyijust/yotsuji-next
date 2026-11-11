@@ -850,15 +850,19 @@ function later(fn){ if(pressing){ deferred.add(fn); return true; } return false;
 document.addEventListener("pointerdown",()=>{ pressing=true; },true);
 const release=()=>{ if(!pressing) return; pressing=false; setTimeout(()=>{ const fs=[...deferred]; deferred.clear(); fs.forEach(f=>f()); },0); };
 document.addEventListener("pointerup",release,true); document.addEventListener("pointercancel",release,true);
-let candsHtml="", candLimit=60, candCtx="";  // 候補は上位から60曲ずつ描く（全部描くと重い）。Nowや条件が変わると60に戻る
+let candsHtml="", candLimit=60, candCtx="", candOrder=null, candHold=false;
+// タグ・星を付けると点数が変わって曲が上へ飛び、見ていた場所から消えたように見える（ユーザー指摘）。
+// 付けた直後は並びを据え置き、Now・選び方・絞り込みが変わったときに並べ直す  // 候補は上位から60曲ずつ描く（全部描くと重い）。Nowや条件が変わると60に戻る
 function renderCands(keepSel){
   if(!S.now){ return; }
   if(later(()=>renderCands(true))) return;
   if(!keepSel) sel=0;
   // Now・選び方・絞り込みが変わったときだけ60曲に戻す（裏での描き直しでは戻さない）
   const ck=[S.now,LS.get("mode","flow"),$("#fBpm").value,$("#fKey").checked,$("#fArtist").checked,$("#fHalf").checked,LS.get("fTag",""),LS.get("fCc",""),popRange().join("-")].join("|");
-  if(ck!==candCtx){ candCtx=ck; candLimit=60; }
-  const list=suggest(); const top=list.slice(0,candLimit);
+  if(ck!==candCtx){ candCtx=ck; candLimit=60; candHold=false; }
+  const list=suggest();
+  if(candHold && candOrder){ const pos=new Map(candOrder.map((id,i)=>[id,i])); list.sort((a,b)=>(pos.get(a.id)??1e9)-(pos.get(b.id)??1e9)); }
+  candOrder=list.map(c=>c.id); const top=list.slice(0,candLimit);
   $("#candInfo").textContent = list.weak?`候補 ${list.length}曲（参考）`:`候補 ${list.length}曲`;
   if(!top.length){ candsHtml=""; $("#cands").innerHTML=`<div class="empty">条件に合う候補がありません。フィルタを緩めるか、この曲を含むプレイリストを読み込んでください。</div>`; return; }
   const max=top[0].sc, lm=labelMap();
@@ -876,7 +880,7 @@ function renderCands(keepSel){
 const tagsOf=id=>S.tags[id]?.t||[];
 // ---------- 星の評価（1〜5、同じ星をもう一度押すと外す） ----------
 const rateOf=id=>S.rate[id]?.r||0;
-function setRate(id,r){ r=Math.max(0,Math.min(5,r|0)); if(r && r===rateOf(id)) r=0; S.rate[id]={r,at:Date.now()}; DB.set("rate",S.rate);
+function setRate(id,r){ r=Math.max(0,Math.min(5,r|0)); if(r && r===rateOf(id)) r=0; S.rate[id]={r,at:Date.now()}; DB.set("rate",S.rate); if(id!==S.now) candHold=true;
   renderDeck(true); renderCands(true); if(tagPopId===id) renderTagPop(); autoSync(); }
 const starsEdit=(id,attr)=>{ const r=rateOf(id); return `<span class="stars" title="評価（同じ星をもう一度押すと外す）">${[1,2,3,4,5].map(n=>`<button class="st${n<=r?" on":""}" ${attr}="${n}" aria-label="星${n}">★</button>`).join("")}</span>`; };
 
@@ -889,7 +893,7 @@ const TAG_PRESET=[["時間帯",["Opener","Warm Up","Build Up","Peak Time","Closi
 const PRESET_ALL=TAG_PRESET.flatMap(([,l])=>l);
 const cleanTag=x=>String(x||"").replace(/^#/,"").replace(/\s+/g," ").trim().slice(0,24);
 function allTags(){ const n={}; for(const v of Object.values(S.tags)) for(const t of v.t||[]) n[t]=(n[t]||0)+1; return Object.entries(n).sort((a,b)=>b[1]-a[1]).map(x=>x[0]); }
-function setTags(id,list){ const t=[...new Set(list.map(cleanTag).filter(Boolean))]; S.tags[id]={t,at:Date.now()}; DB.set("tags",S.tags); renderTagFilter(); refresh(); renderDeck(true); if(tagPopId===id) renderTagPop(); autoSync(); }
+function setTags(id,list){ const t=[...new Set(list.map(cleanTag).filter(Boolean))]; S.tags[id]={t,at:Date.now()}; DB.set("tags",S.tags); if(id!==S.now) candHold=true; renderTagFilter(); refresh(); renderDeck(true); if(tagPopId===id) renderTagPop(); autoSync(); }
 // タグを付けた曲の一覧（左ペイン「タグの曲」）。タグを選ぶとその曲だけ、「すべて」はタグ付きの曲全部。曲を押すとNowへ
 function renderTagList(){ const box=$("#tagListBox"); if(!box) return; if(later(renderTagList)) return;
   const all=allTags(), cur=LS.get("tagListTag",""), sort=LS.get("tagListSort","new"), sel=all.includes(cur)?cur:"";
@@ -1727,7 +1731,7 @@ function renderModes(){ const cur=LS.get("mode","flow");
   $("#reroll").hidden=cur!=="surprise"; }
 function setMode(k){ LS.set("mode",k); renderModes(); renderCands(); setStatus("選び方："+MODES[k].label+" — "+MODES[k].tip); }
 $("#modes").onclick=e=>{ const b=e.target.closest("[data-mode]"); if(b) setMode(b.dataset.mode); };
-$("#reroll").onclick=()=>{ S.seed=(S.seed||0)+1; renderCands(); };
+$("#reroll").onclick=()=>{ S.seed=(S.seed||0)+1; candHold=false; renderCands(); };
 renderModes();
 // 左右の仕切り：ドラッグ／←→キーで幅を変え、LS sideW に保存。ダブルクリックで既定に戻す
 const SIDE_DEF=340, sideClamp=w=>Math.round(Math.max(240,Math.min(w,innerWidth-380,900)));
