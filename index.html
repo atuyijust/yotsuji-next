@@ -630,8 +630,9 @@ const MODES={
   flow:    {label:"いつもの流れ", tip:"自分のプレイリストで並べた順を重視",                      m:{flow:1,   co:1,   bpm:1,key:1,gen:1,  af:0, nov:0, rnd:0,  pop:0, eng:0}},
   similar: {label:"似た曲",       tip:"音の特徴（エネルギー・ダンス度・明るさ・生音っぽさ・インスト度・ボーカル量・音量をライブラリ内で比較）とジャンルから見て雰囲気が近い曲",            m:{flow:.3,  co:.6,  bpm:1,key:1,gen:1.5,af:3, nov:0, rnd:0,  pop:0, eng:0}},
   surprise:{label:"ジャンル越え", tip:"今の曲とジャンルが全く重ならない曲だけ（同じ・近いジャンルは出さない）。その中でBPM・キー・音の感じがつながる順。🎲で入れ替え", m:{flow:0, co:0, bpm:1,key:1,gen:0, af:0,nov:0, rnd:.5,pop:0, eng:0, cross:2.5, snd:1}},
-  up:      {label:"上げる",       tip:"今よりエネルギーが少し高い曲",                              m:{flow:.5,  co:.5,  bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0,  pop:0, eng:3}},
-  down:    {label:"落とす",       tip:"今よりエネルギーが少し低い曲",                              m:{flow:.5,  co:.5,  bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0,  pop:0, eng:3}},
+  up:      {label:"上げる",       tip:"今よりエネルギーが少し高い曲（根拠タグ：Banger・Anthem・Big Drop 等も加点）", m:{flow:.5,  co:.5,  bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0,  pop:0, eng:3}},
+  down:    {label:"落とす",       tip:"今よりエネルギーが少し低い曲（根拠タグ：Cool Down・Tool・Transition 等も加点）", m:{flow:.5,  co:.5,  bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0,  pop:0, eng:3}},
+  next:    {label:"次の時間帯へ", tip:"今の曲の時間帯タグ（Opener→Warm Up→Build Up→Peak Time→Closing→After Hours）の、次の時間帯のタグが付いた曲を重視", m:{flow:.5, co:.5, bpm:1,key:1,gen:.7, af:.5,nov:0, rnd:0, pop:0, eng:0, slot:3}},
 };
 const afOf=id=>S.meta[id]?.af||null;
 // リリース年: 集めた曲情報の初リリース（MusicBrainz）があれば優先（ベスト盤・再発のアルバム年に引っぱられないように）→ アルバムの年
@@ -705,6 +706,7 @@ function genreSim(A,B,md){ if(!A.size||!B.size) return null; let best=0;
 function vibe(cur,id,ctx){ const parts=[];
   const s=afSim(ctx.curAf,afOf(id),ctx.st); if(s!=null) parts.push(["音",s,.6]);
   const g=genreSim(ctx.curG,genreSet(id,ctx.lm)); if(g!=null) parts.push(["ジャンル",g,.25]);
+  if(ctx.mood){ const ms=moodSim(ctx.curMood,moodOf(id)); if(ms!=null) parts.push(["ムード",ms,.3]); }
   if(!parts.length) return null;
   const w=parts.reduce((x,p)=>x+p[2],0), v=parts.reduce((x,p)=>x+p[1]*p[2],0)/w;
   return {v, why:parts.filter(p=>p[1]>=.5).map(p=>p[0])}; }
@@ -723,16 +725,19 @@ function suggest(){
     for(const id of new Set(ids)) co[id]=(co[id]||0)+wgt;
   }
   const curBpm=bpmOf(cur), curKey=keyOf(cur), curGen=genOf(cur), curArt=new Set(S.tracks[cur]?.artists.map(a=>a.id)), curAf=afOf(cur);
-  const lm=labelMap(), vctx={curAf, st:(M.af||M.snd)?afStats():{}, lm, curG:genreSet(cur,lm)};
+  const lm=labelMap(), vctx={curAf, st:(M.af||M.snd)?afStats():{}, lm, curG:genreSet(cur,lm), curMood:moodOf(cur), mood:mode==="similar"};
   const fB=+$("#fBpm").value, fK=$("#fKey").checked, fA=$("#fArtist").checked, half=$("#fHalf").checked;
   const [pMin,pMax]=popRange(), fPop=pMin>0||pMax<100;  // POPの範囲（人気度が分からない曲は絞り込み中は出さない）
-  const W={flow:w("wFlow")*M.flow,co:w("wCo")*M.co,bpm:w("wBpm")*M.bpm,key:w("wKey")*M.key,gen:w("wGen")*M.gen,year:w("wYear")*(M.year??1),cc:w("wCc")*(M.cc??1),af:M.af,nov:M.nov,rnd:M.rnd,pop:M.pop,eng:M.eng,cross:M.cross||0,snd:M.snd||0};
+  const W={flow:w("wFlow")*M.flow,co:w("wCo")*M.co,bpm:w("wBpm")*M.bpm,key:w("wKey")*M.key,gen:w("wGen")*M.gen,year:w("wYear")*(M.year??1),cc:w("wCc")*(M.cc??1),af:M.af,nov:M.nov,rnd:M.rnd,pop:M.pop,eng:M.eng,cross:M.cross||0,snd:M.snd||0,slot:M.slot||0};
   const seed=cur+":"+(S.seed||0);
   // 点数の表示用: 全部の条件が満点のときの合計（1位を100にすると、BPMとキーが合うだけの曲も100に見えてしまうため）
   const fCc=LS.get("fCc",""), curCc=countriesOf(cur);
   const curTags=tagsOf(cur), fTag=LS.get("fTag",""), TAG_W=1.5;  // 今の曲と同じタグ1つにつき +1.5（2つまで）
+  // 時間帯の段階: Now に無ければ履歴を新しい順にさかのぼり、時間帯タグが付いた直近の曲で決める
+  let curSlot=slotOf(curTags);
+  if(curSlot<0){ for(let i=S.hist.length-1;i>=0;i--){ const s=slotOf(tagsOf(S.hist[i])); if(s>=0){ curSlot=s; break; } } }
   const curYear=yearOf(cur);
-  const ideal=Math.max(1, [W.flow,W.co,W.bpm,W.key,W.gen,W.year,curCc.length?W.cc:0].reduce((x,v)=>x+Math.max(0,v),0)+(W.af>0?W.af*1.2:0)+W.nov+W.rnd+W.pop*.6+W.eng+W.cross+W.snd*1.2+(curTags.length?TAG_W*Math.min(2,curTags.length):0));
+  const ideal=Math.max(1, [W.flow,W.co,W.bpm,W.key,W.gen,W.year,curCc.length?W.cc:0].reduce((x,v)=>x+Math.max(0,v),0)+(W.af>0?W.af*1.2:0)+W.nov+W.rnd+W.pop*.6+W.eng+W.cross+W.snd*1.2+(curTags.length?TAG_W*Math.min(2,curTags.length):0)+W.slot);
   const pool = new Set([...Object.keys(S.occ), ...S.saved]);
   const res=[], weak=[];
   for(const id of pool){
@@ -769,6 +774,24 @@ function suggest(){
       const d=(af.en-curAf.en)*(mode==="down"?-1:1);   // 上げる方向をプラスに
       const v = d>=.03&&d<=.25?1 : d>.25?.4 : d>-.03?.2 : -.8;
       sc+=W.eng*v; chips.push([v>=1?"g":v>0?"y":"r", `エネルギー ${af.en>=curAf.en?"+":"−"}${Math.abs(Math.round((af.en-curAf.en)*100))}`]);
+    }
+    // 上げる／落とすの根拠タグ: energy が無い曲でもタグ付けが方向の根拠になる（同方向は加点、逆向きは減点）
+    if(W.eng && (mode==="up"||mode==="down")){
+      const good=tg.filter(x=>(mode==="up"?UP_TAGS:DOWN_TAGS).includes(x)), bad=tg.filter(x=>(mode==="up"?DOWN_TAGS:UP_TAGS).includes(x));
+      if(good.length){ sc+=W.eng*.7; chips.push(["g", `${mode==="up"?"上げる":"落とす"}タグ #${good[0]}`]); }
+      else if(bad.length){ sc+=W.eng*(-.5); chips.push(["r", `${mode==="up"?"落とす":"上げる"}タグ #${bad[0]}`]); }
+    }
+    // 時間帯: 次の段階のタグが付いた曲を重視（同段階は弱く、2つ先は中間、それより先は小さく、戻る段階は減点。After Hours の次は同段階＝継続）
+    if(W.slot && curSlot>=0){
+      const ixs=tg.map(t=>TIME_TAGS.indexOf(t)).filter(i=>i>=0);
+      if(ixs.length){ let bv=-Infinity, bi=-1;
+        for(const i of ixs){ const d=i-curSlot, v=d===1?1:d===0?.35:d===2?.5:d>2?.25:-.4; if(v>bv){ bv=v; bi=i; } }
+        sc+=W.slot*bv; const d=bi-curSlot;
+        if(d===1) chips.push(["g", `次の時間帯 ${TIME_TAGS[bi]}`]);
+        else if(d===0) chips.push(["y", `時間帯 ${TIME_TAGS[bi]}`]);
+        else if(d>1) chips.push(["y", `時間帯 ${TIME_TAGS[bi]}（先）`]);
+        else chips.push(["r", `時間帯 ${TIME_TAGS[bi]}（戻る）`]);
+      }
     }
     if(W.pop && t.pop!=null){ sc+=W.pop*(1-t.pop/100)*.6; if(t.pop<30) chips.push(["y","隠れた曲"]); }
     if(W.rnd) sc+=W.rnd*rnd01(seed+id);
@@ -886,11 +909,27 @@ const starsEdit=(id,attr)=>{ const r=rateOf(id); return `<span class="stars" tit
 
 // 最初から用意しておく定番タグ（DJがフォルダ／マイタグ分けに使う区分: 時間帯・役割・音の要素・ムード・版）
 const TAG_PRESET=[["時間帯",["Opener","Warm Up","Build Up","Peak Time","Closing","After Hours"]],
-  ["役割",["Banger","Anthem","Tool","Transition","Cool Down","Singalong"]],
-  ["要素",["Vocal","Instrumental","Acapella","Female Vox","Male Vox","Rap","Long Intro","Big Drop"]],
-  ["ムード",["Dark","Groovy","Euphoric","Emotional","Chill","Funky","Hard","Deep"]],
-  ["版",["Edit","Remix","Mashup","Bootleg","Classic","New"]]];
+  ["役割",["Banger","Anthem","Tool","Transition","Cool Down","Singalong","Secret Weapon","Crowd Pleaser","Reset"]],
+  ["要素",["Vocal","Instrumental","Acapella","Female Vox","Male Vox","Rap","Long Intro","Big Drop","Piano","Percussion"]],
+  ["ムード",["Dark","Groovy","Euphoric","Emotional","Chill","Funky","Hard","Deep","Uplifting"]],
+  ["版",["Edit","Remix","Mashup","Bootleg","Classic","New","Dub","Cover"]],
+  ["場所",["Lounge","Bar","Main Floor","Big Room","Warehouse","Festival"]]];
 const PRESET_ALL=TAG_PRESET.flatMap(([,l])=>l);
+const TIME_TAGS=TAG_PRESET[0][1];  // 時間帯タグは並び順がそのまま夜の進行（Opener→Warm Up→Build Up→Peak Time→Closing→After Hours）
+const UP_TAGS=["Banger","Anthem","Crowd Pleaser","Big Drop","Euphoric","Hard","Peak Time"]; // 上げる根拠タグ
+const DOWN_TAGS=["Cool Down","Tool","Transition","Chill","Deep","Closing","After Hours"]; // 落とす根拠タグ
+const slotOf=tg=>{ const ix=tg.map(t=>TIME_TAGS.indexOf(t)).filter(i=>i>=0); return ix.length?Math.min(...ix):-1; };  // タグ一覧→時間帯の段階（無ければ -1）
+const MOOD_TAGS=TAG_PRESET[3][1];  // ムードタグ（Dark/Groovy/Euphoric/Emotional/Chill/Funky/Hard/Deep）
+const MOOD_NEAR=[["Groovy","Funky"],["Euphoric","Uplifting"]]; // 近いムード
+const MOOD_OPP=[["Chill","Hard"],["Dark","Euphoric"]]; // 対立するムード
+const moodOf=id=>tagsOf(id).filter(t=>MOOD_TAGS.includes(t));
+// ムードの近さ: 一致=1、近い=.6、対立=0、両方あるが無関係=.3。どちらか無ければ null（比べない）
+function moodSim(a,b){ if(!a.length||!b.length) return null;
+  if(a.some(t=>b.includes(t))) return 1;
+  const pair=(x,y)=>(a.includes(x)&&b.includes(y))||(a.includes(y)&&b.includes(x));
+  if(MOOD_NEAR.some(([x,y])=>pair(x,y))) return .6;
+  if(MOOD_OPP.some(([x,y])=>pair(x,y))) return 0;
+  return .3; }
 const cleanTag=x=>String(x||"").replace(/^#/,"").replace(/\s+/g," ").trim().slice(0,24);
 function allTags(){ const n={}; for(const v of Object.values(S.tags)) for(const t of v.t||[]) n[t]=(n[t]||0)+1; return Object.entries(n).sort((a,b)=>b[1]-a[1]).map(x=>x[0]); }
 function setTags(id,list){ const t=[...new Set(list.map(cleanTag).filter(Boolean))]; S.tags[id]={t,at:Date.now()}; DB.set("tags",S.tags); if(id!==S.now) candHold=true; renderTagFilter(); refresh(); renderDeck(true); if(tagPopId===id) renderTagPop(); autoSync(); }
