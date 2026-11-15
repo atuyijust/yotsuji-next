@@ -183,9 +183,15 @@
     header{flex-wrap:wrap;gap:8px 12px;padding:8px 12px}
     header .sp{display:none}
     #status{width:100%;order:9}
-    main{display:block;height:auto}
+    main{display:flex;flex-direction:column;height:auto}
     #split{display:none}
-    aside{border-right:0;border-bottom:1px solid var(--line);padding:12px}
+    aside{display:contents}
+    aside>*{order:4}
+    .npRow{order:1;padding:12px 12px 0}
+    #deck{order:2;margin:0 12px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+    section.list{order:3}
+    aside>h2,aside>.search-res,aside>details{margin-left:12px;margin-right:12px}
+    #q{width:calc(100% - 24px)!important;margin-left:12px;margin-right:12px}
     section.list{padding:0 12px 10px}
     input,select{font-size:16px}
     .filters{gap:6px 10px;padding-top:8px}
