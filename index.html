@@ -189,6 +189,7 @@
     aside>*{order:4}
     .npRow{order:1;padding:12px 12px 0}
     #deck{order:2;margin:0 12px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+    #info,#dWeights{order:2}
     section.list{order:3}
     aside>h2,aside>.search-res,aside>details{margin-left:12px;margin-right:12px}
     #q{width:calc(100% - 24px)!important;margin-left:12px;margin-right:12px}
@@ -1051,7 +1052,7 @@ async function queue(id){ const uri=S.tracks[id].uri; toast("Spotifyのキュー
   if(await withDevice(dv=>api(`/me/player/queue?uri=${encodeURIComponent(uri)}${dv?"&device_id="+dv:""}`,{method:"POST"}),"キュー追加")) toast("キューに追加："+S.tracks[id].name); }
 // 再生の指示が通っても Spotify 側で曲が読み込まれず「無」になることがある（Macアプリで確認）。
 // 指示のあと実際に鳴っている曲を確かめ、違えば アルバム文脈で再送 → それでもだめなら Spotify アプリで曲を開く
-async function nowPlayingId(){ const j=await api("/me/player?market=from_token").catch(()=>null); return j?{id:j.item?.id||"",from:j.item?.linked_from?.id||"",playing:j.is_playing,dev:j.device?.name||""}:null; }
+async function nowPlayingId(){ const j=await api("/me/player?market=from_token").catch(()=>null); return j?{id:j.item?.id||"",from:j.item?.linked_from?.id||"",playing:j.is_playing,dev:j.device?.name||"",name:j.item?.name||"",artists:(j.item?.artists||[]).map(a=>a.name||"")}:null; }
 async function confirmPlay(id){ for(let i=0;i<4;i++){ await sleep(700); const p=await nowPlayingId(); if(p && (p.id===id||p.from===id)) return true; } return false; }
 function openInSpotify(id){ const a=document.createElement("a"); a.href="spotify:track:"+id; a.click(); }
 async function play(id,opt){ const t=S.tracks[id], uri=t.uri||("spotify:track:"+id); const noOpen=!!opt?.noOpen; toast("Spotifyに再生を指示中…");
@@ -1065,7 +1066,9 @@ async function play(id,opt){ const t=S.tracks[id], uri=t.uri||("spotify:track:"+
       if(/^404/.test(e.message||"")){ if(noOpen){ toast("この端末のSpotifyアプリにつながらなかったので、再生できませんでした（アプリは開きません）"); } else { toast("この端末のSpotifyアプリにつながらなかったので、アプリで曲を開きます"); openInSpotify(id); } } else toast(playErr(e,"再生")); return false; })
     : withDevice(dv=>{ if(dv) dev=dv; return api(`/me/player/play${(dv||dev)?"?device_id="+(dv||dev):""}`,{method:"PUT",body:JSON.stringify(body)}); },"再生");
   const cur=await nowPlayingId().catch(()=>null);
-  if(cur && (cur.id===id||cur.from===id)){ if(cur.playing){ toast("再生中です："+t.name); return; } if(await send({})) toast("再開："+t.name); return; }
+  const norm=s=>(s||"").toLowerCase().replace(/[\s　]+/g," ").trim();
+  const sameSong=!!(cur && cur.name && norm(cur.name)===norm(t.name) && norm(cur.artists?.[0])===norm(t.artists?.[0]?.name));
+  if(cur && (cur.id===id||cur.from===id||sameSong)){ if(cur.playing){ toast("再生中です："+t.name); return; } if(await send({})) toast("再開："+t.name); return; }
   if(!(await send({uris:[uri]}))) return;
   if(await confirmPlay(id)){ toast("再生："+t.name); return; }
   // 2回目: アルバムの中のその曲として再生（単曲指定で読み込めないときに効くことがある）
