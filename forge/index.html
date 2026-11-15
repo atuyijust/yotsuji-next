@@ -217,6 +217,7 @@
               <span class="spacer"></span>
               <select id="reorder" title="並び替え"></select>
               <button id="btn-copy-all" class="btn btn-ghost" title="一覧の全曲を「アーティスト名 - 曲名」で 1 行ずつコピー">一覧をコピー</button>
+              <button id="btn-export-ai" class="btn btn-ghost" title="条件と結果をAIへのフィードバック用テキストで出力">AI用テキスト</button>
               <button id="btn-regen" class="btn btn-ghost">作り直す</button>
               <button id="btn-save" class="btn btn-primary">Spotify に保存</button>
             </div>
@@ -261,6 +262,19 @@
         <div class="row end">
           <button value="cancel" class="btn btn-ghost">キャンセル</button>
           <button id="set-save" value="save" class="btn btn-primary">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="ai-export">
+      <form method="dialog" class="settings">
+        <h2>AI フィードバック用テキスト</h2>
+        <p class="hint">条件・生成時のメモ・全曲の特徴量と出どころを含むテキストです。AI チャットに貼って改善フィードバックに使えます。</p>
+        <textarea id="ai-export-text" rows="18" readonly style="width:100%; font-family:monospace; font-size:12px"></textarea>
+        <div class="row end">
+          <button type="button" id="btn-ai-download" class="btn btn-ghost">.txt で保存</button>
+          <button type="button" id="btn-ai-copy" class="btn btn-primary">コピー</button>
+          <button value="cancel" class="btn btn-ghost">閉じる</button>
         </div>
       </form>
     </dialog>

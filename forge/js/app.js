@@ -717,6 +717,105 @@ const copyAll = () => {
   copyText(state.tracks.map(artistTitle).join('\n'), `${state.tracks.length} 曲の「アーティスト名 - 曲名」をコピーしました`);
 };
 
+// ---------------- AI フィードバック用テキスト出力 ----------------
+// 条件・生成時のメモ・全曲の特徴量と出どころを 1 つのテキストにまとめ、
+// スクショの代わりに AI チャットへ貼って選曲の改善フィードバックに使えるようにする
+const pad2 = (n) => String(n).padStart(2, '0');
+function buildAiText() {
+  const c = collectCriteria();
+  const now = new Date();
+  const stamp = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+  const lines = [];
+  lines.push('# Playlist Forge 生成結果（AI フィードバック用）');
+  lines.push(`生成日時: ${stamp}`);
+  lines.push(`プレイリスト名: ${$('#pl-name').value.trim() || '（無題）'}`);
+  lines.push(`結果: ${$('#stats').textContent}`);
+  lines.push('');
+  lines.push('## 指定した条件');
+  const nl = $('#nl-input').value.trim();
+  if (nl) lines.push(`- 文章で指定: ${nl}`);
+  if (c.seedTracks.length) {
+    const info = $('#seed-track-info');
+    const infoText = !info.hidden ? info.textContent.replace(/\s+/g, ' ').trim() : '';
+    lines.push(`- 似せたい曲: ${c.seedTracks.map((t) => `${t.name} – ${t.artist}`).join('、')}${infoText ? `（${infoText}）` : ''}`);
+  }
+  if (c.seedArtists.length) {
+    const modeLabel = document.querySelector('input[name="seedMode"]:checked')?.closest('label')?.textContent.trim() || '';
+    lines.push(`- 似せたいアーティスト: ${c.seedArtists.map((a) => a.name).join('、')}${modeLabel ? `（集め方: ${modeLabel}）` : ''}`);
+  }
+  if (c.genres.length) lines.push(`- ジャンル: ${c.genres.join('、')}`);
+  if (c.theme) lines.push(`- テーマ: ${c.theme}`);
+  if (c.keywords) lines.push(`- キーワード: ${c.keywords}`);
+  if (c.labels.length) lines.push(`- レーベル: ${c.labels.join('、')}`);
+  if (c.countries.length) lines.push(`- 国（含める）: ${c.countries.map((x) => COUNTRY_NAME[x] || x).join('、')}`);
+  if (c.excludeCountries.length) lines.push(`- 国（除外）: ${c.excludeCountries.map((x) => COUNTRY_NAME[x] || x).join('、')}`);
+  if (c.excludeArtists.length) lines.push(`- 除外アーティスト: ${c.excludeArtists.join('、')}`);
+  const period = (y, m) => `${y ? `${y}年` : ''}${m ? `${m}月` : ''}`;
+  const from = period(c.yearFrom, c.monthFrom);
+  const to = period(c.yearTo, c.monthTo);
+  if (from || to) lines.push(`- リリース時期: ${from && to ? `${from}〜${to}` : from || to}`);
+  if (c.durationMin != null || c.durationMax != null) {
+    const dur = c.durationMin != null && c.durationMax != null ? `${c.durationMin}〜${c.durationMax} 分` : c.durationMin != null ? `${c.durationMin} 分以上` : `${c.durationMax} 分まで`;
+    lines.push(`- 曲の長さ: ${dur}`);
+  }
+  if (c.useMyTop) lines.push('- 自分がよく聴く曲をもとに探す: はい');
+  if (c.excludeExplicit) lines.push('- Explicit を除く: はい');
+  const featFmt = (f, v) => (f?.pct ? `${Math.round(v * 100)}` : f?.key === 'tempo' ? `${Number(v.toFixed(1))}` : `${Math.round(v)}`);
+  const featParts = Object.entries(c.features).map(([key, [lo, hi]]) => {
+    const f = FEATURES.find((x) => x.key === key);
+    return `${f?.label || key} ${featFmt(f, lo)}〜${featFmt(f, hi)}`;
+  });
+  if (featParts.length) lines.push(`- サウンド条件: ${featParts.join('、')}`);
+  if (c.mode && c.mode !== 'any') lines.push(`- 調: ${c.mode === 'major' ? 'メジャー' : 'マイナー'}`);
+  lines.push(`- BPM の倍・半分を同じテンポとみなす: ${c.halfDouble ? 'はい' : 'いいえ'}`);
+  lines.push(`- 特徴量がない曲は除く: ${c.requireFeatures ? 'はい' : 'いいえ'}`);
+  const orderText = $('#order').selectedOptions[0]?.textContent || c.order;
+  const depthText = $('#depth').selectedOptions[0]?.textContent || '';
+  lines.push(`- 出力: 曲数 ${c.size} / 1アーティスト最大 ${c.maxPerArtist} / 並び順: ${orderText} / 探す範囲: ${depthText}`);
+  lines.push('');
+  lines.push('## 生成時のメモ（アプリ表示）');
+  const note = $('#gen-note');
+  lines.push(note.hidden || !note.textContent.trim() ? '（なし）' : note.textContent.trim());
+  lines.push('');
+  lines.push(`## 曲一覧（${state.tracks.length}曲）`);
+  state.tracks.forEach((x, i) => {
+    const f = x.features || {};
+    const segs = [`${i + 1}. ${x.artists.map((a) => a.name).join(', ')} - ${x.name}`];
+    if (x.album?.name) segs.push(x.album.year ? `${x.album.name}（${x.album.year}）` : x.album.name);
+    if (f.tempo) segs.push(`BPM ${f.tempo.toFixed(1)}`);
+    const kl = keyLabel(f.key, f.mode);
+    if (kl) segs.push(`キー ${kl}`);
+    if (f.energy != null) segs.push(`E ${Math.round(f.energy * 100)}`);
+    if (f.danceability != null) segs.push(`D ${Math.round(f.danceability * 100)}`);
+    if (f.valence != null) segs.push(`明 ${Math.round(f.valence * 100)}`);
+    if (x.popularity != null) segs.push(`人気 ${x.popularity}`);
+    const g = src.cachedGenres(x.artists[0]?.name || '');
+    segs.push(`ジャンル ${g?.length ? g.join(' / ') : '不明'}`);
+    const srcs = x.sources ? [...x.sources.keys()].map((k) => SRC_LABEL[k] || k) : [];
+    if (srcs.length) segs.push(`出どころ: ${srcs.join('・')}`);
+    lines.push(segs.join('｜'));
+    if (x.themeWhy?.length) lines.push(`　（テーマ理由：${x.themeWhy.join(' ／ ')}）`);
+  });
+  return lines.join('\n');
+}
+
+const openAiExport = () => {
+  if (!state.tracks.length) return toast('先に曲を探してください');
+  $('#ai-export-text').value = buildAiText();
+  $('#ai-export').showModal();
+};
+
+const downloadAiText = () => {
+  const now = new Date();
+  const name = `forge-result-${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}-${pad2(now.getHours())}${pad2(now.getMinutes())}.txt`;
+  const blob = new Blob([$('#ai-export-text').value], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
 
 
 async function savePlaylist() {
@@ -965,6 +1064,9 @@ function init() {
   $('#btn-generate').addEventListener('click', runGenerate);
   $('#btn-regen').addEventListener('click', runGenerate);
   $('#btn-copy-all').addEventListener('click', copyAll);
+  $('#btn-export-ai').addEventListener('click', openAiExport);
+  $('#btn-ai-copy').addEventListener('click', () => copyText($('#ai-export-text').value, 'AI 用テキストをコピーしました'));
+  $('#btn-ai-download').addEventListener('click', downloadAiText);
   $('#btn-save').addEventListener('click', savePlaylist);
   $('#btn-nl').addEventListener('click', runNL);
   $('#nl-input').addEventListener('keydown', (e) => {
