@@ -404,6 +404,7 @@ const S = {
   rate:{},          // 自分で付けた星 id -> {r:1〜5（0＝なし）, at:更新時刻}（Gistで同期、新しい方が勝つ）
   tags:{},          // 自分で付けたタグ id -> {t:["ピーク",...], at:更新時刻}（Gistで同期、新しい方が勝つ）
   ex:{},            // 自動収集した曲情報 id -> {at,done,sp,dz,mb,wk}
+  alb:{},           // アルバムID -> レーベル名（Spotifyアルバム情報から取得、候補とNow Playingのレーベル表示用）
   occ:{},           // id -> [[plIdx,pos],...]
   now:null, hist:[], me:null, lastPlayingId:null
 };
@@ -845,17 +846,14 @@ function renderDeck(force){
   const aff=m.af, fv2=v=>v==null?"–":Math.round(v*100);
   const undo=S.hist.length?`<button class="sm" data-undo title="ひとつ前のNowに戻す（U）">↶ 戻す</button>`:"";
   $("#mobileNow").innerHTML=`<b>NOW</b>${esc(t.name)} <span class="muted">— ${esc(arts(t))}</span><span class="m">${m.bpm?m.bpm.toFixed(1):"—"} ${m.key||""}</span>${undo?" "+undo:""}`;
-  $("#deck").innerHTML=`<div class="row"><img src="${esc(t.img)}" alt=""><div><div class="t">${esc(t.name)}${t.na?` <span class="na" title="Spotifyで再生できない曲（配信停止・地域制限など）。候補には出しません">リンク切れ</span>`:""}</div><div class="a">${esc(arts(t))}${ccSpan(t.id)}</div>${(()=>{ const gl=genreList(t.id,labelMap()); return gl.length?`<div class="gps">${gl.slice(0,4).map(x=>genrePill(x,true)).join("")}</div>`:""; })()}<div class="muted">${esc(t.album)} ${t.year||""}</div>${pls.length?`<div class="muted" title="${esc(pls.join("、"))}">収録 ${pls.length} PL：${esc(cut(pls.join("、"),42))}</div>`:""}${aff&&(aff.en!=null||aff.da!=null)?`<div class="muted">エネルギー${fv2(aff.en)} ダンス${fv2(aff.da)} 明るさ${fv2(aff.va)}</div>`:""}</div></div>
+  $("#deck").innerHTML=`<div class="row"><img src="${esc(t.img)}" alt=""><div><div class="t">${esc(t.name)}${t.na?` <span class="na" title="Spotifyで再生できない曲（配信停止・地域制限など）。候補には出しません">リンク切れ</span>`:""}</div><div class="a">${esc(arts(t))}${ccSpan(t.id)}</div>${(()=>{ const gl=genreList(t.id,labelMap()); return gl.length?`<div class="gps">${gl.slice(0,4).map(x=>genrePill(x,true)).join("")}</div>`:""; })()}<div class="muted">${esc(t.album)} ${t.year||""}${(()=>{ const l=labelOf(t.id,labelMap()); return l?` · ${esc(cut(l,32))}`:""; })()}</div>${pls.length?`<div class="muted" title="${esc(pls.join("、"))}">収録 ${pls.length} PL：${esc(cut(pls.join("、"),42))}</div>`:""}${aff&&(aff.en!=null||aff.da!=null)?`<div class="muted">エネルギー${fv2(aff.en)} ダンス${fv2(aff.da)} 明るさ${fv2(aff.va)}</div>`:""}</div></div>
    <div class="bk"><span class="big">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="muted">BPM</span><span class="big k">${m.key||"—"}</span><span class="muted">${m.genre?esc(m.genre):""} ${m.src?"("+(SRC_LABEL[m.src]||m.src)+(m.kSrc&&m.kSrc!==m.src?" / キー: "+(SRC_LABEL[m.kSrc]||m.kSrc):"")+(m.bSrc&&m.bSrc!==m.src?" / BPM: "+(SRC_LABEL[m.bSrc]||m.bSrc):"")+")":""}${m.src==="rekordbox"&&m.rbName&&norm(m.rbName)!==norm(t.name)?` <span class="muted" title="rekordbox のこの曲と照合しました">← rekordbox「${esc(m.rbName)}」</span>`:""}</span></div>
-   <div class="bk"><input id="eBpm" placeholder="BPM" value="${m.bpm||""}"><input id="eKey" placeholder="キー 8A/Am" value="${m.key||""}"><button class="sm" id="saveMeta">保存</button><button class="sm" id="tap">TAP</button><button class="sm" data-p="${t.id}" title="Spotifyで再生">▶ 再生</button><button class="sm" data-c="${t.id}" title="曲名をコピー">⎘ コピー</button><button class="sm" data-lyr="${t.id}" title="曲名とアーティスト名で歌詞を検索（別のタブで開く。アプリでは歌詞を取得しない）">歌詞 ↗</button>${undo}<span class="muted" id="tapv"></span></div>
+   <div class="bk"><input id="eBpm" placeholder="BPM" value="${m.bpm||""}"><input id="eKey" placeholder="キー 8A/Am" value="${m.key||""}"><button class="sm" id="saveMeta">保存</button><button class="sm" id="tap">TAP</button><button class="sm" data-tagbtn="${t.id}" title="この曲にタグ・評価を付ける">＃</button><button class="sm" data-p="${t.id}" title="Spotifyで再生">▶ 再生</button><button class="sm" data-c="${t.id}" title="曲名をコピー">⎘ コピー</button><button class="sm" data-lyr="${t.id}" title="曲名とアーティスト名で歌詞を検索（別のタブで開く。アプリでは歌詞を取得しない）">歌詞 ↗</button>${undo}<span class="muted" id="tapv"></span></div>
    <div class="tags" id="deckTags">${tagsOf(t.id).map(x=>`<span class="chip tag">#${esc(x)}<button data-deltag="${esc(x)}" title="外す">×</button></span>`).join("")}</div>
    <div class="bk rateRow" id="deckRate"><span class="muted">評価</span>${starsEdit(t.id,"data-rate")}<span class="muted kh" style="font-size:11px">1〜5キー</span></div>
-   <details class="tagPre" id="tagPre"${LS.get("tagPre",false)?" open":""}><summary>TAG</summary>${[...TAG_PRESET, ...(origTags().length?[["オリジナル",origTags()]]:[])].map(([g,l])=>`<div class="tpg"><span class="muted">${g}</span>${l.map(x=>tagsOf(t.id).includes(x)?`<span class="chip tag g" data-deltag="${esc(x)}" title="外す">#${esc(x)}</span>`:`<span class="chip sug" data-addtag="${esc(x)}" title="このタグを付ける">＋${esc(x)}</span>`).join("")}</div>`).join("")}<div class="tpg"><span class="muted">追加</span><input id="tagIn" placeholder="＋タグ（T）" list="tagList" autocomplete="off"><datalist id="tagList">${[...new Set([...allTags(),...PRESET_ALL])].map(x=>`<option value="${esc(x)}">`).join("")}</datalist></div></details>`;
-  $("#tagIn").onkeydown=e=>{ if(e.isComposing||e.keyCode===229) return;  // 日本語変換の確定Enterでは追加しない
-    if(e.key==="Enter"){ e.preventDefault(); const v=e.target.value; if(cleanTag(v)){ addTag(t.id,v); setTimeout(()=>$("#tagIn")?.focus(),0); } } else if(e.key==="Escape"){ e.target.value=""; e.target.blur(); } };
-  $("#tagPre").ontoggle=e=>LS.set("tagPre",e.target.open);
+   <datalist id="tagList">${[...new Set([...allTags(),...PRESET_ALL])].map(x=>`<option value="${esc(x)}">`).join("")}</datalist>`;
+  fillLabels([t.id]);
   $("#deckRate").onclick=e=>{ const b=e.target.closest("[data-rate]"); if(b) setRate(t.id,+b.dataset.rate); };
-  $("#tagPre").onclick=e=>{ const d=e.target.closest("[data-deltag]"), a=e.target.closest("[data-addtag]"); if(d) delTag(t.id,d.dataset.deltag); else if(a) addTag(t.id,a.dataset.addtag); };
   $("#deckTags").onclick=e=>{ const d=e.target.closest("[data-deltag]"), a=e.target.closest("[data-addtag]"); if(d) delTag(t.id,d.dataset.deltag); else if(a) addTag(t.id,a.dataset.addtag); };
   $("#saveMeta").onclick=()=>{ const bpm=parseFloat($("#eBpm").value)||null; const kRaw=$("#eKey").value.trim(); const key=toCamelot(kRaw);
     if(kRaw && !key){ toast("キーは 8A や Am の形で入力してください"); return; }
@@ -877,13 +875,25 @@ function genreText(id,lm){ const g=S.meta[id]?.genre; if(g) return g;
   for(const a of S.tracks[id]?.artists||[]){ const x=lm.__ag?.[a.id]; if(x) return x.slice(0,2).join("/"); }
   return ""; }
 function labelOf(id,lm){ const e=S.ex[id], t=S.tracks[id];
-  return e?.sp?.label || e?.dz?.album?.label || (t?.albumId&&lm[t.albumId]) || S.meta[id]?.af?.lbl || S.dg[id]?.label?.[0] || ""; }
+  return e?.sp?.label || e?.dz?.album?.label || (t?.albumId&&lm[t.albumId]) || (t?.albumId&&S.alb[t.albumId]) || S.meta[id]?.af?.lbl || S.dg[id]?.label?.[0] || ""; }
 const cut=(x,n)=>x.length>n?x.slice(0,n-1)+"…":x;
 function subLine(id,lm,yv){ const t=S.tracks[id], a=S.meta[id]?.af; const p=[], q=[];
   const yr=yearOf(id); if(t.dur) p.push(fmtDur(t.dur)); if(yr) p.push(yv?`<span class="yr ${yv[0]}" title="${yv[1]}（加点）">${yr}</span>`:yr); if(t.pop!=null) p.push("POP "+t.pop); const l=labelOf(id,lm); if(l) p.push(esc(cut(l,28)));
   if(a && (a.en!=null||a.da!=null||a.va!=null)){ const f=v=>v==null?"–":Math.round(v*100);
     q.push(`<span class="af" title="エネルギー / ダンス度 / 明るさ（0〜100）">E${f(a.en)} D${f(a.da)} V${f(a.va)}</span>`); }
   return (p.length?`<div class="sub">${p.join(" · ")}</div>`:"")+(q.length?`<div class="sub">${q.join(" · ")}</div>`:""); }
+let albRunning=false;
+// 候補とNow Playingのレーベル表示用：レーベルが分からない曲のアルバムをまとめてSpotifyから取得し、アルバムIDでキャッシュする
+async function fillLabels(ids){ if(albRunning) return; const lm=labelMap(); const want=new Map();
+  for(const id of ids){ const t=S.tracks[id]; if(!t?.albumId) continue; if(labelOf(id,lm)) continue; if(t.albumId in S.alb) continue; want.set(t.albumId,id); }
+  if(!want.size) return; if(!(await token().catch(()=>null))) return; albRunning=true;
+  try{ const keys=[...want.keys()];
+    for(let i=0;i<keys.length;i+=20){ const j=await api("/albums?ids="+keys.slice(i,i+20).join(",")).catch(()=>null);
+      (j?.albums||[]).forEach((a,ix)=>{ if(a) S.alb[keys[i+ix]]=a.label||""; });
+      for(const k of keys.slice(i,i+20)) if(!(k in S.alb)) S.alb[k]=""; }
+    await DB.set("alb",S.alb);
+  }catch{}
+  albRunning=false; renderCands(true); if(S.now) renderDeck(); }
 let pressing=false; const deferred=new Set();
 function later(fn){ if(pressing){ deferred.add(fn); return true; } return false; }
 document.addEventListener("pointerdown",()=>{ pressing=true; },true);
@@ -904,7 +914,7 @@ function renderCands(keepSel){
   candOrder=list.map(c=>c.id); const top=list.slice(0,candLimit);
   $("#candInfo").textContent = list.weak?`候補 ${list.length}曲（参考）`:`候補 ${list.length}曲`;
   if(!top.length){ candsHtml=""; $("#cands").innerHTML=`<div class="empty">条件に合う候補がありません。フィルタを緩めるか、この曲を含むプレイリストを読み込んでください。</div>`; return; }
-  const max=top[0].sc, lm=labelMap();
+  const max=top[0].sc, lm=labelMap(); fillLabels(top.map(c=>c.id));
   const rows = top.map((c,i)=>{ const t=S.tracks[c.id]; const m=S.meta[c.id]||{};
     return `<div class="cand${i===sel?" sel":""}" data-i="${i}" data-id="${c.id}"><span class="sc" title="全部の条件が揃ったときを100とした点">${list.weak?"—":c.pct}</span><img src="${esc(t.img)}" alt="" loading="lazy">
       <div><div class="nm">${esc(t.name)}${(()=>{ const gl=genreList(c.id,lm); return (gl.length?gl.slice(0,3).map(x=>genrePill(x)).join(""):`<span class="gp none" title="ジャンル不明">？</span>`)+(c.gst?`<span class="gj ${c.gst[0]}"${c.gst[2]?` title="${esc(c.gst[2])}"`:""}>${c.gst[1]}</span>`:""); })()}</div><div class="muted">${esc(arts(t))}${ccSpan(c.id,c.ccv)}<span class="cstars">${starsEdit(c.id,"data-crate")}</span></div>${subLine(c.id,lm,c.yv)}<div class="chips">${c.chips.map(([k,x])=>`<span class="chip ${k}">${esc(x)}</span>`).join("")}</div></div>
@@ -1038,22 +1048,25 @@ async function queue(id){ const uri=S.tracks[id].uri; toast("Spotifyのキュー
 async function nowPlayingId(){ const j=await api("/me/player?market=from_token").catch(()=>null); return j?{id:j.item?.id||"",from:j.item?.linked_from?.id||"",playing:j.is_playing,dev:j.device?.name||""}:null; }
 async function confirmPlay(id){ for(let i=0;i<4;i++){ await sleep(700); const p=await nowPlayingId(); if(p && (p.id===id||p.from===id)) return true; } return false; }
 function openInSpotify(id){ const a=document.createElement("a"); a.href="spotify:track:"+id; a.click(); }
-async function play(id){ const t=S.tracks[id], uri=t.uri||("spotify:track:"+id); toast("Spotifyに再生を指示中…");
+async function play(id,opt){ const t=S.tracks[id], uri=t.uri||("spotify:track:"+id); const noOpen=!!opt?.noOpen; toast("Spotifyに再生を指示中…");
   let dev="";
   if(IS_PHONE || IS_TABLET){ const d=await ownDevice();
     // この端末の Spotify アプリが一覧に出ていない（起動していない）: アプリで曲を開く。開いたあとは一覧に出るので、次の ▶ からこの端末で鳴る
-    if(!d){ toast(`この${IS_PHONE?"iPhone":"iPad"}のSpotifyアプリで曲を開きます（アプリが起動していなかったため）。次からは ▶ でこの端末で鳴ります`); openInSpotify(id); return; }
+    if(!d){ if(noOpen){ toast("この端末のSpotifyが見つからないため、再生できませんでした（アプリは開きません）"); return; } toast(`この${IS_PHONE?"iPhone":"iPad"}のSpotifyアプリで曲を開きます（アプリが起動していなかったため）。次からは ▶ でこの端末で鳴ります`); openInSpotify(id); return; }
     dev=d.id; }
   const mine=dev;  // この端末の Spotify: 失敗しても Mac などほかのデバイスに切り替えない
   const send=body=>mine ? api(`/me/player/play?device_id=${mine}`,{method:"PUT",body:JSON.stringify(body)}).then(()=>true,e=>{
-      if(/^404/.test(e.message||"")){ toast("この端末のSpotifyアプリにつながらなかったので、アプリで曲を開きます"); openInSpotify(id); } else toast(playErr(e,"再生")); return false; })
+      if(/^404/.test(e.message||"")){ if(noOpen){ toast("この端末のSpotifyアプリにつながらなかったので、再生できませんでした（アプリは開きません）"); } else { toast("この端末のSpotifyアプリにつながらなかったので、アプリで曲を開きます"); openInSpotify(id); } } else toast(playErr(e,"再生")); return false; })
     : withDevice(dv=>{ if(dv) dev=dv; return api(`/me/player/play${(dv||dev)?"?device_id="+(dv||dev):""}`,{method:"PUT",body:JSON.stringify(body)}); },"再生");
+  const cur=await nowPlayingId().catch(()=>null);
+  if(cur && (cur.id===id||cur.from===id)){ if(cur.playing){ toast("再生中です："+t.name); return; } if(await send({})) toast("再開："+t.name); return; }
   if(!(await send({uris:[uri]}))) return;
   if(await confirmPlay(id)){ toast("再生："+t.name); return; }
   // 2回目: アルバムの中のその曲として再生（単曲指定で読み込めないときに効くことがある）
   if(t.albumId){ toast("Spotifyで読み込めなかったので、アルバムから再生し直しています…");
     if(await send({context_uri:"spotify:album:"+t.albumId, offset:{uri}}) && await confirmPlay(id)){ toast("再生："+t.name); return; } }
   const p=await nowPlayingId();
+  if(noOpen){ toast(`Spotifyで再生が始まりませんでした（${p?.dev?"デバイス: "+p.dev+"、":""}${p?.id?"今の曲は別の曲":"曲が読み込まれていません"}）。アプリは開きません`); return; }
   toast(`Spotifyで再生が始まりませんでした（${p?.dev?"デバイス: "+p.dev+"、":""}${p?.id?"今の曲は別の曲":"曲が読み込まれていません"}）。Spotifyアプリでこの曲を開きます`);
   openInSpotify(id);
 }
@@ -1679,7 +1692,7 @@ document.addEventListener("keydown",e=>{
   if(typing) return;
   if(e.key==="/"){ e.preventDefault(); $("#q").focus(); }
   else if(e.key==="Home"){ e.preventDefault(); toTop(); }
-  else if((e.key==="t"||e.key==="T") && $("#tagIn")){ e.preventDefault(); const tp=$("#tagPre"); if(tp && !tp.open){ tp.open=true; LS.set("tagPre",true); } $("#tagIn").focus(); }
+  else if((e.key==="t"||e.key==="T") && S.now){ e.preventDefault(); if(tagPopId===S.now) closeTagPop(); else openTagPop(S.now, document.querySelector('#deck [data-tagbtn]')); }
   else if(e.key==="ArrowDown"||e.key==="j"){ e.preventDefault(); moveSel(1); }
   else if(e.key==="ArrowUp"||e.key==="k"){ e.preventDefault(); moveSel(-1); }
   else if(e.key==="Enter"){ const r=$$("#cands .cand")[sel]; if(r){ e.preventDefault(); setNow(r.dataset.id); } }
@@ -1716,7 +1729,7 @@ document.addEventListener("click",e=>{
   const b=e.target.closest("[data-q],[data-p],[data-n],[data-c],[data-v]"); if(!b) return;
   if(b.dataset.v){ const [src,kind,i]=b.dataset.v.split(":"); const x=S.ex[src]?.sp?.[kind]?.[+i]; if(x){ if(!S.tracks[x.id]) S.tracks[x.id]=x; setNow(x.id); } }
   else if(b.dataset.c){ copyTrack(b.dataset.c,b); }
-  else if(b.dataset.q) queue(b.dataset.q); else if(b.dataset.p) play(b.dataset.p); else if(b.dataset.n){ setNow(b.dataset.n); $("#sres").innerHTML=""; $("#q").value=""; }
+  else if(b.dataset.q) queue(b.dataset.q); else if(b.dataset.p) play(b.dataset.p, b.closest(".cand")?{noOpen:true}:undefined); else if(b.dataset.n){ setNow(b.dataset.n); $("#sres").innerHTML=""; $("#q").value=""; }
 });
 $("#btnLib").onclick=openLib; $("#closeLib").onclick=()=>{ saveSel(); $("#dlgLib").close(); };
 // ---------- 設定の受け渡し（Mac → iPhone）: Client ID と GitHub トークンを1つの文字列にしてクリップボードで渡す ----------
@@ -1812,7 +1825,7 @@ $("#autoInfo").checked=LS.get("autoInfo",true); $("#autoInfo").onchange=e=>{ LS.
 (async()=>{
   await DB.open();
   S.tracks=await DB.get("tracks")||{}; S.playlists=await DB.get("playlists")||[]; S.saved=await DB.get("saved")||[];
-  S.meta=await DB.get("meta")||{}; S.dz=await DB.get("dz")||{}; S.dg=await DB.get("dg")||{}; S.rb=await DB.get("rb")||{}; S.ex=await DB.get("ex")||{}; S.tags=await DB.get("tags")||{}; S.rate=await DB.get("rate")||{}; S.ag=await DB.get("ag")||{}; S.ac=await DB.get("ac")||{}; S.plIndex=await DB.get("plIndex")||[];
+  S.meta=await DB.get("meta")||{}; S.dz=await DB.get("dz")||{}; S.dg=await DB.get("dg")||{}; S.rb=await DB.get("rb")||{}; S.ex=await DB.get("ex")||{}; S.tags=await DB.get("tags")||{}; S.rate=await DB.get("rate")||{}; S.ag=await DB.get("ag")||{}; S.ac=await DB.get("ac")||{}; S.plIndex=await DB.get("plIndex")||[]; S.alb=await DB.get("alb")||{};
   for(const v of Object.values(S.ex)) v.running=false;
   S.hist=LS.get("hist",[]); S.now=LS.get("now",null);
   buildIndex(); renderTagFilter(); renderCcFilter();
