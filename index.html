@@ -757,7 +757,7 @@ function suggest(){
   for(const id of pool){
     if(played.has(id)) continue; const t=S.tracks[id]; if(!t || t.na) continue;
     if(fPop && (t.pop==null || t.pop<pMin || t.pop>pMax)) continue;
-    const tg=tagsOf(id); if(fTag && !tg.includes(fTag)) continue; if(fCc && !ccMatch(id,fCc,curCc)) continue; let yv=null;
+    const tg=tagsOf(id); if(tg.includes(NO_CAND_TAG)) continue; if(fTag && !tg.includes(fTag)) continue; if(fCc && !ccMatch(id,fCc,curCc)) continue; let yv=null;
     const venueMiss=fVenue && !tg.includes(fVenue);  // 場所の前提に合わない曲は候補から外す（候補が空なら参考表示行き）
     const sameArt = t.artists.some(a=>curArt.has(a.id));
     if(fA && sameArt) continue;
@@ -946,8 +946,9 @@ const TAG_PRESET=[["時間帯",["Opener","Warm Up","Build Up","Peak Time","Closi
   ["要素",["Vocal","Instrumental","Acapella","Female Vox","Male Vox","Rap","Long Intro","Big Drop","Piano","Percussion"]],
   ["ムード",["Dark","Groovy","Euphoric","Emotional","Chill","Funky","Hard","Deep","Uplifting"]],
   ["版",["Edit","Remix","Mashup","Bootleg","Classic","New","Dub","Cover"]],
-  ["場所",["Lounge","Bar","Main Floor","Big Room","Warehouse","Festival"]]];
+  ["場所",["Lounge","Bar","Main Floor","Big Room","Warehouse","Festival"]],["除外",["候補にださない"]]];
 const PRESET_ALL=TAG_PRESET.flatMap(([,l])=>l);
+const NO_CAND_TAG="候補にださない";  // このタグが付いた曲は候補に一切出さない（参考表示にも回さない）
 const TIME_TAGS=TAG_PRESET[0][1];  // 時間帯タグは並び順がそのまま夜の進行（Opener→Warm Up→Build Up→Peak Time→Closing→After Hours）
 const UP_TAGS=["Banger","Anthem","Crowd Pleaser","Big Drop","Euphoric","Hard","Peak Time"]; // 上げる根拠タグ
 const DOWN_TAGS=["Cool Down","Tool","Transition","Chill","Deep","Closing","After Hours"]; // 落とす根拠タグ
