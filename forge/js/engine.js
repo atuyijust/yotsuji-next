@@ -1,6 +1,7 @@
 // 候補収集 → 特徴量取得 → 絞り込み → スコアリング → 選曲
 import * as sp from './spotify.js';
 import * as src from './sources.js';
+import { getTasteProfile, likedSeedTrackIds, artistGenresById, fencedOut } from './profile.js';
 import { FEATURES, themeTags, themeOf } from './data.js';
 import { suggestThemeTracks, aiName } from './nl.js';
 import { norm, baseTitle, shuffle, pLimit } from './util.js';
@@ -62,6 +63,8 @@ export async function generate(c, onProgress = () => {}) {
   let aiUsed = '';
   let aiError = '';
   let dzLists = 0;
+  // お気に入りから作る好みプロフィール（useMyTop のときだけ構築する）
+  let tasteProfile = null;
   // テーマ（例: halloween）。指定したら、テーマに合う曲だけから選ぶ（年代・国・サウンドは絞り込みとして効く）
   const tTags = themeTags(c.theme);
   const themeMode = tTags.length > 0;
@@ -112,31 +115,33 @@ export async function generate(c, onProgress = () => {}) {
   const tasks = [];
 
   // 似ている曲（Last.fm：曲単位の類似＋似たアーティストの代表曲）
-  async function gatherSimilar() {
+  async function gatherSimilar(profile = null) {
     log('似ている曲を Last.fm で探しています…', 12);
     const lf = new Map();
-    const put = (artist, name, score) => {
+    // from は候補の出どころ（'similar' か、好みプロフィール由来の 'mytop'）。照合時にそのまま使う
+    const put = (artist, name, score, from = 'similar') => {
       const ak = norm(artist);
       if (c.seedMode === 'similar' && seedNames.has(ak)) return;
       if (excludeArtistNames.has(ak) || scriptExcluded(`${artist} ${name}`)) return;
       const k = `${ak}|${baseTitle(name)}`;
       if (seedTrackKeys.has(k)) return;
       const e = lf.get(k);
-      if (!e) lf.set(k, { artist, name, score, hits: 1 });
+      if (!e) lf.set(k, { artist, name, score, hits: 1, src: from });
       else {
         e.score = Math.max(e.score, score);
         e.hits++;
+        if (from === 'mytop') e.src = 'mytop';
       }
     };
     const topN = { 1: 3, 2: 5, 3: 8 }[depth];
     // 1 アーティストあたりの上限があるので、曲数をそろえるには十分な人数のアーティストが必要
     const needArtists = Math.ceil((size / maxPer) * 1.6);
     const perArtistTop = maxPer + 2;
-    const simScore = new Map(); // 似たアーティスト（正規化名 → {name, match}）
-    const setSim = (name, match) => {
+    const simScore = new Map(); // 似たアーティスト（正規化名 → {name, match, src}）
+    const setSim = (name, match, from = 'similar') => {
       const k = norm(name);
       if (seedNames.has(k) || excludeArtistNames.has(k)) return;
-      if ((simScore.get(k)?.match ?? -1) < match) simScore.set(k, { name, match });
+      if ((simScore.get(k)?.match ?? -1) < match) simScore.set(k, { name, match, src: from });
     };
     // 似せたい曲：その曲と「一緒に聴かれている曲」がいちばん確か。曲のアーティストに似た人も候補にする
     await Promise.all(
@@ -165,6 +170,24 @@ export async function generate(c, onProgress = () => {}) {
         );
       }),
     );
+    // 好みプロフィールの中核アーティスト（あなた向け用）。集めた候補は 'mytop' として入れる
+    if (profile?.coreArtists?.length) {
+      await Promise.all(
+        profile.coreArtists.slice(0, 8).map(async (a) => {
+          const [tops, simA] = await Promise.all([
+            src.artistTopTracks(a.name, topN).catch(() => []),
+            src.similarArtists(a.name, Math.min(100, Math.max(30, needArtists))).catch(() => []),
+          ]);
+          simA.forEach((x) => setSim(x.name, x.match * 0.9, 'mytop'));
+          await Promise.all(
+            tops.map(async (t) => {
+              const sims = await src.similarTracks(t.artist, t.name, 100).catch(() => []);
+              sims.forEach((x) => put(x.artist, x.name, 0.25 + 0.45 * x.match, 'mytop'));
+            }),
+          );
+        }),
+      );
+    }
     // Spotify で照合できた曲を、アーティストごとに数える
     const resolvedPerArtist = new Map();
     const capacity = () => [...resolvedPerArtist.values()].reduce((sum, n) => sum + Math.min(n, maxPer), 0);
@@ -181,7 +204,7 @@ export async function generate(c, onProgress = () => {}) {
           if (toppedArtists.has(k)) return;
           toppedArtists.add(k);
           const tt = await src.artistTopTracks(x.name, perArtistTop).catch(() => []);
-          tt.forEach((t, i) => put(x.name, t.name, 0.1 + 0.35 * x.match * (1 - i / (perArtistTop * 2))));
+          tt.forEach((t, i) => put(x.name, t.name, 0.1 + 0.35 * x.match * (1 - i / (perArtistTop * 2)), x.src || 'similar'));
         }),
       );
 
@@ -210,7 +233,7 @@ export async function generate(c, onProgress = () => {}) {
           done++;
           if (done % 10 === 0) log(`似ている曲を Spotify で照合しています… ${capacity()}/${target}`, pct);
           if (t) {
-            add(t, 'similar', e.score);
+            add(t, e.src || 'similar', e.score);
             const ak = norm(e.artist);
             resolvedPerArtist.set(ak, (resolvedPerArtist.get(ak) || 0) + 1);
           }
@@ -295,8 +318,11 @@ export async function generate(c, onProgress = () => {}) {
     if (!useLastfm) rbSeeds.push(st.id);
   }
 
-  // 自分のよく聴く曲
+  // 自分のよく聴く曲：お気に入り全体から好みプロフィールを構築し、
+  // 中核アーティストを Last.fm の種に、自分の曲を ReccoBeats の種にする（取れなければ従来どおりトップ曲だけ）
   if (c.useMyTop) {
+    tasteProfile = await getTasteProfile(log).catch(() => null);
+    if (tasteProfile) rbSeeds.push(...likedSeedTrackIds(tasteProfile, 10));
     tasks.push(
       sp
         .myTopTracks()
@@ -308,9 +334,9 @@ export async function generate(c, onProgress = () => {}) {
   await Promise.all(tasks);
   tasks.length = 0;
 
-  // 似ている曲（Last.fm：曲単位の類似＋似たアーティストの代表曲）
-  if (hasSimilarSeeds && useLastfm) {
-    await gatherSimilar();
+  // 似ている曲（Last.fm：曲単位の類似＋似たアーティストの代表曲。好みプロフィールの中核アーティストも種にする）
+  if (useLastfm && (hasSimilarSeeds || tasteProfile?.coreArtists?.length)) {
+    await gatherSimilar(tasteProfile);
   }
   if (rbSeeds.length) {
     const groups = [];
@@ -635,6 +661,29 @@ export async function generate(c, onProgress = () => {}) {
     keywordDropped += beforeKw - batch.length;
     if (!batch.length) return;
 
+    // 好みプロフィールのジャンルの柵：あなた向け・似ている経由だけで集まった候補のうち、
+    // アーティストのジャンルが判明していて好みの範囲と 1 つも重ならないものは外す（ジャンル不明は落とさない）
+    if (tasteProfile?.topGenres?.length) {
+      const targets = batch.filter((t) => {
+        const ks = [...t.sources.keys()];
+        return ks.some((k) => k === 'mytop' || k === 'similar') && ks.every((k) => k === 'mytop' || k === 'similar');
+      });
+      if (targets.length) {
+        const byId = await artistGenresById(targets.map((t) => t.artists[0]?.id));
+        const out = new Set();
+        for (const t of targets) {
+          let gs = (t.artists[0]?.id && byId.get(t.artists[0].id)) || [];
+          if (!gs.length) gs = src.cachedGenres(t.artists[0]?.name || '') || [];
+          if (fencedOut(gs, tasteProfile)) out.add(t.id);
+        }
+        if (out.size) {
+          drop('好みの範囲外', out.size);
+          batch = batch.filter((t) => !out.has(t.id));
+          if (!batch.length) return;
+        }
+      }
+    }
+
     log(`${batch.length} 曲の特徴量（BPM など）を取得しています…`, pct);
     const feats = await src.audioFeatures(batch.map((t) => t.id));
     batch.forEach((t) => (t.features = feats.get(t.id) || null));
@@ -824,7 +873,10 @@ export async function generate(c, onProgress = () => {}) {
     // 国を除外する指定で国が分からなかった曲は、分かっている曲より後ろに
     const unknownPenalty = exc.size && t.countryUnknown ? 0.12 : 0;
     // テーマでは BPM などは「絞り込み」として効けば十分なので、範囲の中央に近いかどうかはあまり重視しない
-    t.score = closeness(t) * (themeMode ? 0.15 : 0.6) + srcBonus + profileSim(t) * 0.35 + popBonus + themeBonus + Math.random() * 0.04 - unknownPenalty - (t.miss > 0 ? 10 + t.miss : 0);
+    let score = closeness(t) * (themeMode ? 0.15 : 0.6) + srcBonus + profileSim(t) * 0.35 + popBonus + themeBonus + Math.random() * 0.04 - unknownPenalty;
+    // あなた向け・似ている経由で人気度が極端に低い曲は、落としはせず少し後ろへ（無名すぎる曲ばかりになるのを防ぐ）
+    if ((t.sources.has('mytop') || t.sources.has('similar')) && t.popularity != null && t.popularity < 20) score *= 0.5;
+    t.score = score - (t.miss > 0 ? 10 + t.miss : 0);
   }
   cands.sort((a, b) => b.score - a.score);
 
@@ -921,6 +973,7 @@ export async function generate(c, onProgress = () => {}) {
       requested: size,
       cappedByArtist,
       noLastfm: !useLastfm && hasSimilarSeeds,
+      tasteProfile: tasteProfile ? { trackCount: tasteProfile.trackCount, topGenres: (tasteProfile.topGenres || []).slice(0, 3) } : null,
     },
   };
 }

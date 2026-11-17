@@ -7,7 +7,7 @@ import { store, sleep, pLimit, norm, baseTitle } from './util.js';
 
 const AUTH = 'https://accounts.spotify.com';
 const API = 'https://api.spotify.com/v1';
-const SCOPES = 'playlist-modify-private playlist-modify-public user-read-private user-top-read user-modify-playback-state user-read-playback-state';
+const SCOPES = 'playlist-modify-private playlist-modify-public user-read-private user-top-read user-library-read user-modify-playback-state user-read-playback-state';
 const TOKEN_KEY = 'spm.token';
 
 // 置いてあるフォルダの URL（例: https://atuyijust.github.io/yotsuji-next/forge/、ローカルなら http://127.0.0.1:8000/）

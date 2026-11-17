@@ -1,6 +1,6 @@
 {
-  "name": "四辻 NEXT",
-  "short_name": "四辻 NEXT",
+  "name": "SELECTIT",
+  "short_name": "SELECTIT",
   "description": "Spotifyライブラリから次の曲を提案する選曲アシスト",
   "start_url": "./",
   "scope": "./",

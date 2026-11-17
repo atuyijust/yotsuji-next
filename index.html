@@ -5,12 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<title>四辻 NEXT — 選曲アシスト</title>
+<title>SELECTIT — 選曲アシスト</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="theme-color" content="#0c0d0e">
-<meta name="apple-mobile-web-app-title" content="四辻 NEXT">
+<meta name="apple-mobile-web-app-title" content="SELECTIT">
 <style>
   :root{
     --bg:#0c0d0e; --panel:#141617; --line:#24282a; --text:#d9dedf; --dim:#7d8689;
@@ -235,7 +235,7 @@
 </head>
 <body>
 <header>
-  <h1>四辻 <span>NEXT</span></h1>
+  <h1>SELECT<span>IT</span></h1>
   <span id="djBadge">DJ MODE</span>
   <span id="status">未接続</span>
   <button class="sm" id="updBtn" hidden title="新しい版が公開されています">新しい版に更新</button>
@@ -268,7 +268,7 @@
     <div id="tagListBox"></div>
     </details>
 
-    <details class="side" id="dHist" open><summary><h2>セット履歴</h2> <button class="sm" id="btnExport">プレイリスト化</button> <button class="sm" id="btnClearHist">履歴をクリア</button></summary>
+    <details class="side" id="dHist" open><summary><h2>セット履歴</h2> <button class="sm" id="btnExport">プレイリスト化</button> <button class="sm" id="btnCsv">CSV書き出し</button> <button class="sm" id="btnClearHist">履歴をクリア</button></summary>
     <div class="hist" id="hist"><div class="muted">まだありません</div></div>
     </details>
   </aside>
@@ -306,7 +306,7 @@
 <dialog id="dlgSetup">
   <div class="in">
     <h2>はじめに</h2>
-    <p>Mac の四辻 NEXT で <b>「ライブラリ」→「iPhoneへ設定を渡す」</b> を押してから、下のボタンを押してください。Macと同じ曲・BPM・タグがそのまま使えます。</p>
+    <p>Mac の SELECTIT で <b>「ライブラリ」→「iPhoneへ設定を渡す」</b> を押してから、下のボタンを押してください。Macと同じ曲・BPM・タグがそのまま使えます。</p>
     <button id="setupPaste" class="pri" style="width:100%;padding:12px;font-size:16px">設定を貼り付ける</button>
     <div id="setupManual" hidden style="margin-top:10px"><p class="muted">うまく読めないときは、ここに長押しで貼り付けてください</p>
       <textarea id="setupText" rows="3" style="width:100%;box-sizing:border-box;font:12px var(--mono)" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
@@ -369,7 +369,7 @@
     <div class="muted" id="syncInfo" style="margin-top:4px;font-size:12px"></div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
       <button id="setupCopy" class="pri">iPhoneへ設定を渡す</button>
-      <span class="muted">Client ID と同期のトークンをコピーします。iPhone で四辻 NEXT を開き「設定を貼り付ける」を押すだけで、Macと同じ状態になります（同じApple IDのユニバーサルクリップボード）</span>
+      <span class="muted">Client ID と同期のトークンをコピーします。iPhone で SELECTIT を開き「設定を貼り付ける」を押すだけで、Macと同じ状態になります（同じApple IDのユニバーサルクリップボード）</span>
     </div>
 
     <h2>6. バックアップ（ファイル）</h2>
@@ -1089,12 +1089,24 @@ function setFollow(on){ clearInterval(pollTimer); LS.set("follow",on); if(on){ p
 
 async function exportSet(){
   const ids=[...S.hist, ...(S.now?[S.now]:[])]; if(!ids.length){ toast("履歴がありません"); return; }
-  try{ const d=new Date(); const name=`四辻 NEXT set ${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
-    const pl=await api("/me/playlists",{method:"POST",body:JSON.stringify({name,public:false,description:"四辻 NEXT で組んだセット"})});
+  try{ const d=new Date(); const name=`SELECTIT set ${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+    const pl=await api("/me/playlists",{method:"POST",body:JSON.stringify({name,public:false,description:"SELECTIT で組んだセット"})});
     const uris=ids.map(id=>S.tracks[id]?.uri).filter(Boolean);
     for(let i=0;i<uris.length;i+=100) await api(`/playlists/${pl.id}/items`,{method:"POST",body:JSON.stringify({uris:uris.slice(i,i+100)})});
     toast("プレイリストを作成しました："+name);
   }catch(e){ toast("作成に失敗："+e.message); }
+}
+
+function exportCsv(){
+  const ids=[...S.hist, ...(S.now?[S.now]:[])]; if(!ids.length){ toast("履歴がありません"); return; }
+  const q=v=>`"${String(v??"").replace(/"/g,'""')}"`;
+  const rows=[["No","曲名","アーティスト","アルバム","年","BPM","キー","ジャンル","タグ","長さ(秒)","Spotify URL"].join(",")];
+  ids.forEach((id,i)=>{ const t=S.tracks[id]; if(!t) return; const m=S.meta[id]||{};
+    rows.push([i+1, q(t.name), q(arts(t)), q(t.album||""), t.year||"", m.bpm?m.bpm.toFixed(1):"", q(m.key||""), q(m.genre||""), q(tagsOf(id).join(" ")), t.dur?Math.round(t.dur/1000):"", "https://open.spotify.com/track/"+id].join(",")); });
+  const d=new Date(); const pad=n=>String(n).padStart(2,"0");
+  const fn=`set-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.csv`;
+  const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob(["\uFEFF"+rows.join("\r\n")],{type:"text/csv"})); a.download=fn; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+  toast("CSVを書き出しました："+fn);
 }
 
 // ---------- Deezer から BPM 補完 ----------
@@ -1505,7 +1517,7 @@ function libPayload(){
   return {v:1, at:LS.get("libStamp",0), tracks:T, playlists:S.playlists, saved:S.saved, plIndex:S.plIndex, ag:S.ag, ac:S.ac, af, rb:S.rb}; }
 async function libPush(){ const stamp=LS.get("libStamp",0); if(!stamp || stamp<=LS.get("libSent",0) || !Object.keys(S.tracks).length) return;
   syncMsg("同期：曲データを送信中…"); const id=await findLibGist();
-  const body={description:"四辻 NEXT 曲データ",public:false,files:{[LIB_FILE]:{content:JSON.stringify(libPayload())}}};
+  const body={description:"SELECTIT 曲データ",public:false,files:{[LIB_FILE]:{content:JSON.stringify(libPayload())}}};
   const r=await gh(id?"/gists/"+id:"/gists",{method:id?"PATCH":"POST",body:JSON.stringify(body)}); const j=await r.json(); if(j.id) LS.set("libGistId",j.id);
   LS.set("libSent",stamp); }
 async function libPull(){ const id=await findLibGist(); if(!id) return 0;
@@ -1554,7 +1566,7 @@ async function syncPush(){
     // 送る前に受け取って合成（上書き事故を防ぐ）
     if(id){ const g=await (await gh("/gists/"+id)).json(); const f=g.files[SYNC_FILE]; if(f){ let txt=f.content; if(f.truncated) txt=await (await fetch(f.raw_url,{cache:"no-store"})).text(); try{ mergeMeta(JSON.parse(txt)); }catch{} } }
     const dirtyAt=LS.get("syncDirty",0);
-    const body={description:"四辻 NEXT 同期データ",public:false,files:{[SYNC_FILE]:{content:JSON.stringify(syncPayload())}}};
+    const body={description:"SELECTIT 同期データ",public:false,files:{[SYNC_FILE]:{content:JSON.stringify(syncPayload())}}};
     const r=await gh(id?"/gists/"+id:"/gists",{method:id?"PATCH":"POST",body:JSON.stringify(body)}); const j=await r.json();
     if(!j.id) throw new Error("送信できませんでした（GitHub "+r.status+"）");
     LS.set("gistId",j.id); LS.set("lastSync",Date.now()); LS.set("syncSentAt",Date.now()); if(j.history?.[0]?.version) LS.set("syncVer",j.history[0].version);
@@ -1747,7 +1759,7 @@ async function setupCopy(){ const cid=LS.get("cid",""), gt=LS.get("ghTok","");
   if(!cid && !gt){ toast("この端末にはまだ設定がありません"); return; }
   const txt=SETUP_PRE+btoa(unescape(encodeURIComponent(JSON.stringify({v:1,cid,gh:gt}))));
   try{ await navigator.clipboard.writeText(txt); }catch{ const ta=document.createElement("textarea"); ta.value=txt; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); }
-  toast("コピーしました。iPhoneで四辻 NEXT を開いて「設定を貼り付ける」を押してください"+(gt?"":"（同期のトークンが無いので、曲データは渡りません）")); }
+  toast("コピーしました。iPhoneで SELECTIT を開いて「設定を貼り付ける」を押してください"+(gt?"":"（同期のトークンが無いので、曲データは渡りません）")); }
 async function setupApply(txt){ const m=String(txt||"").trim().match(/yotsuji-setup:([A-Za-z0-9+/=]+)/);
   if(!m){ $("#setupMsg").textContent="設定の文字列が見つかりません。Macで「iPhoneへ設定を渡す」を押してから、もう一度どうぞ"; $("#setupManual").hidden=false; return false; }
   let d; try{ d=JSON.parse(decodeURIComponent(escape(atob(m[1])))); }catch{ $("#setupMsg").textContent="設定の文字列が壊れています。もう一度コピーしてください"; return false; }
@@ -1787,6 +1799,7 @@ $("#metaIn").onchange=async e=>{ const f=e.target.files[0]; if(!f) return; Objec
 $("#q").oninput=doSearch;
 $("#follow").onchange=e=>setFollow(e.target.checked);
 $("#btnExport").onclick=e=>{ e.stopPropagation(); exportSet(); };
+$("#btnCsv").onclick=e=>{ e.stopPropagation(); exportCsv(); };
 $("#btnClearHist").onclick=e=>{ e.stopPropagation(); S.hist=[]; LS.set("hist",[]); refresh(); };
 ["wFlow","wCo","wBpm","wKey","wGen","wYear","wCc"].forEach(id=>{ const el=$("#"+id); const sp=el.nextElementSibling; el.value=LS.get(id,el.value); sp.textContent=el.value;
   el.oninput=()=>{ sp.textContent=el.value; LS.set(id,el.value); renderCands(); }; });

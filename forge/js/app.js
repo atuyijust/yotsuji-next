@@ -416,6 +416,7 @@ async function runGenerate() {
     await resolveSeedNames();
     const c = collectCriteria();
     store.set('spm.lastCriteria', c);
+    store.set('spm.lastGenCriteria', c);
     if (!c.theme && !c.genres.length && !c.seedArtists.length && !c.seedTracks.length && !c.labels.length && !c.keywords && !c.useMyTop && !c.countries.length) {
       throw new Error('ジャンル・テーマ・似せたい曲・似せたいアーティスト・レーベル・キーワード・国のうち、少なくとも 1 つを指定してください（文章で指定してもOKです）');
     }
@@ -488,6 +489,7 @@ function renderTracks() {
         (th.soundActive ? '\nBPM などのサウンド条件が付いています。定番曲がこの条件で外れていることがあるので、テーマで探すときは外すのがおすすめです。' : ''),
     );
   }
+  if (s.tasteProfile) notes.push(`お気に入り ${s.tasteProfile.trackCount.toLocaleString()} 曲から作った好みプロフィール（主なジャンル: ${s.tasteProfile.topGenres.join(' / ')}）を基準に選びました。`);
   if (s.nearUsed) notes.push(`条件どおりの曲だけでは足りなかったため、サウンドの範囲からわずかに外れた曲を ${s.nearUsed} 曲入れています（一覧の後ろの方）。`);
   if (s.relaxedCap) notes.push(`足りない分を補うため、${s.relaxedCap} 組のアーティストは上限より 1 曲多く入れています。`);
   if (s.noLastfm) notes.push('Last.fm の API キーが未設定のため、似ている曲の精度が低くなっています。「設定」でキーを入れてください。');
@@ -505,13 +507,15 @@ function renderTracks() {
       if (f.valence != null) tags.push(`明 ${Math.round(f.valence * 100)}`);
       if (x.popularity != null) tags.push(`人気 ${x.popularity}`);
       const srcKey = [...x.sources.keys()][0];
+      // 末尾の nearUsed 曲は「条件外」（サウンドの範囲からわずかに外れた補充曲）
+      const near = (s.nearUsed || 0) > 0 && i >= t.length - s.nearUsed;
       return `<li class="track" data-i="${i}">
         <span class="num">${i + 1}</span>
         ${x.album?.image ? `<img src="${esc(x.album.image)}" alt="" loading="lazy">` : '<span class="ph"></span>'}
         <div class="meta">
           <div class="title">${esc(x.name)}${x.explicit ? '<span class="e">E</span>' : ''}</div>
           <div class="sub">${esc(x.artists.map((a) => a.name).join(', '))}${x.album ? ` ・ ${esc(x.album.name)}` : ''}${x.album?.year ? ` ・ ${x.album.year}` : ''}</div>
-          <div class="tags">${srcKey ? (x.themeWhy?.length ? `<button type="button" class="tag src why" title="${esc('テーマに入った理由\n・' + x.themeWhy.join('\n・'))}">${SRC_LABEL[srcKey] || srcKey} ⓘ</button>` : `<span class="tag src">${SRC_LABEL[srcKey] || srcKey}</span>`) : ''}${tags.map((g) => `<span class="tag">${g}</span>`).join('')}${(() => { const g = src.cachedGenres(x.artists[0]?.name || ''); return g ? genreTag(g) : '<span class="genre-slot"></span>'; })()}</div>
+          <div class="tags">${srcKey ? (x.themeWhy?.length ? `<button type="button" class="tag src why" title="${esc('テーマに入った理由\n・' + x.themeWhy.join('\n・'))}">${SRC_LABEL[srcKey] || srcKey} ⓘ</button>` : `<span class="tag src">${SRC_LABEL[srcKey] || srcKey}</span>`) : ''}${near ? '<span class="tag near" title="条件（サウンドの範囲）からわずかに外れた補充曲">条件外</span>' : ''}${tags.map((g) => `<span class="tag">${g}</span>`).join('')}${(() => { const g = src.cachedGenres(x.artists[0]?.name || ''); return g ? genreTag(g) : '<span class="genre-slot"></span>'; })()}</div>
         </div>
         <div class="acts">
           <button class="btn-sm act-copy" title="「アーティスト名 - 曲名」をコピー">コピー</button>
@@ -721,8 +725,11 @@ const copyAll = () => {
 // 条件・生成時のメモ・全曲の特徴量と出どころを 1 つのテキストにまとめ、
 // スクショの代わりに AI チャットへ貼って選曲の改善フィードバックに使えるようにする
 const pad2 = (n) => String(n).padStart(2, '0');
+const SEED_MODE_LABEL = { similar: '本人以外の似たアーティスト', include: '本人＋似たアーティスト', only: '本人の曲だけ' };
+const DEPTH_LABEL = { 1: '狭い（速い）', 2: 'ふつう', 3: '広い（時間がかかる）' };
 function buildAiText() {
-  const c = collectCriteria();
+  // 生成時に使った条件を優先する（生成後にフォームを変えても、記録が食い違わないように）
+  const c = store.get('spm.lastGenCriteria') || collectCriteria();
   const now = new Date();
   const stamp = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
   const lines = [];
@@ -740,7 +747,7 @@ function buildAiText() {
     lines.push(`- 似せたい曲: ${c.seedTracks.map((t) => `${t.name} – ${t.artist}`).join('、')}${infoText ? `（${infoText}）` : ''}`);
   }
   if (c.seedArtists.length) {
-    const modeLabel = document.querySelector('input[name="seedMode"]:checked')?.closest('label')?.textContent.trim() || '';
+    const modeLabel = SEED_MODE_LABEL[c.seedMode] || '';
     lines.push(`- 似せたいアーティスト: ${c.seedArtists.map((a) => a.name).join('、')}${modeLabel ? `（集め方: ${modeLabel}）` : ''}`);
   }
   if (c.genres.length) lines.push(`- ジャンル: ${c.genres.join('、')}`);
@@ -769,8 +776,8 @@ function buildAiText() {
   if (c.mode && c.mode !== 'any') lines.push(`- 調: ${c.mode === 'major' ? 'メジャー' : 'マイナー'}`);
   lines.push(`- BPM の倍・半分を同じテンポとみなす: ${c.halfDouble ? 'はい' : 'いいえ'}`);
   lines.push(`- 特徴量がない曲は除く: ${c.requireFeatures ? 'はい' : 'いいえ'}`);
-  const orderText = $('#order').selectedOptions[0]?.textContent || c.order;
-  const depthText = $('#depth').selectedOptions[0]?.textContent || '';
+  const orderText = Object.fromEntries(ORDERS)[c.order] || $('#order').selectedOptions[0]?.textContent || c.order;
+  const depthText = DEPTH_LABEL[c.depth] || $('#depth').selectedOptions[0]?.textContent || '';
   lines.push(`- 出力: 曲数 ${c.size} / 1アーティスト最大 ${c.maxPerArtist} / 並び順: ${orderText} / 探す範囲: ${depthText}`);
   lines.push('');
   lines.push('## 生成時のメモ（アプリ表示）');
@@ -793,7 +800,9 @@ function buildAiText() {
     segs.push(`ジャンル ${g?.length ? g.join(' / ') : '不明'}`);
     const srcs = x.sources ? [...x.sources.keys()].map((k) => SRC_LABEL[k] || k) : [];
     if (srcs.length) segs.push(`出どころ: ${srcs.join('・')}`);
-    lines.push(segs.join('｜'));
+    // 末尾の nearUsed 曲は画面の「条件外」バッジと同じ曲（わずかに条件を外れた補充曲）
+    const near = (state.stats?.nearUsed || 0) > 0 && i >= state.tracks.length - state.stats.nearUsed;
+    lines.push(segs.join('｜') + (near ? '（条件外）' : ''));
     if (x.themeWhy?.length) lines.push(`　（テーマ理由：${x.themeWhy.join(' ／ ')}）`);
   });
   return lines.join('\n');

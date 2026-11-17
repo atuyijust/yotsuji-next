@@ -223,6 +223,7 @@ a.btn { text-decoration: none; color: inherit; display: inline-flex; align-items
 .tag { font-size: 11.5px; padding: 1px 7px; border-radius: 999px; background: var(--panel-2); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .track:hover .tag { background: var(--panel); }
 .tag.src { background: var(--accent-soft); color: var(--accent); }
+.tag.near { background: transparent; border: 1px dashed rgba(255, 130, 130, 0.55); color: #e88; padding: 0 6px; }
 .track .acts { display: flex; gap: 2px; }
 .track .acts { align-items: center; }
 .track .acts .btn-sm { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; font-size: 11.5px; cursor: pointer; white-space: nowrap; }
