@@ -413,7 +413,8 @@ const S = {
   ex:{},            // 自動収集した曲情報 id -> {at,done,sp,dz,mb,wk}
   alb:{},           // アルバムID -> レーベル名（Spotifyアルバム情報から取得、候補とNow Playingのレーベル表示用）
   occ:{},           // id -> [[plIdx,pos],...]
-  now:null, hist:[], me:null, lastPlayingId:null
+  now:null, hist:[], me:null, lastPlayingId:null,
+  playCnt:{}        // Nowに入った回数 id -> 回数（Gistで同期、端末間は大きい方を採用）
 };
 
 // ---------- Spotify認証 (PKCE) ----------
@@ -842,6 +843,7 @@ let toastT=0;
 function toast(m){ setStatus(m); let el=$("#toast"); if(!el){ el=document.createElement("div"); el.id="toast"; el.setAttribute("role","status"); document.body.appendChild(el); }
   el.textContent=m; el.classList.add("on"); clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove("on"),m.length>30?6000:3000); }
 
+const pcSpan=id=>{ const n=S.playCnt?.[id]||0; return n?` <span class="muted" title="Nowに入った回数">Now×${n}</span>`:""; };
 function renderDeck(force){
   if(later(renderDeck)) return;
   // デッキの入力欄（BPM・キー・タグ）に入力中は描き直さない（打っている文字が消えるため）。離れたら描き直す
@@ -853,7 +855,7 @@ function renderDeck(force){
   const aff=m.af, fv2=v=>v==null?"–":Math.round(v*100);
   const undo=S.hist.length?`<button class="sm" data-undo title="ひとつ前のNowに戻す（U）">↶ 戻す</button>`:"";
   $("#mobileNow").innerHTML=`<b>NOW</b>${esc(t.name)} <span class="muted">— ${esc(arts(t))}</span><span class="m">${m.bpm?m.bpm.toFixed(1):"—"} ${m.key||""}</span>${undo?" "+undo:""}`;
-  $("#deck").innerHTML=`<div class="row"><img src="${esc(t.img)}" alt=""><div><div class="t">${esc(t.name)}${t.na?` <span class="na" title="Spotifyで再生できない曲（配信停止・地域制限など）。候補には出しません">リンク切れ</span>`:""}</div><div class="a">${esc(arts(t))}${ccSpan(t.id)}</div>${(()=>{ const gl=genreList(t.id,labelMap()); return gl.length?`<div class="gps">${gl.slice(0,4).map(x=>genrePill(x,true)).join("")}</div>`:""; })()}<div class="muted">${esc(t.album)} ${t.year||""}${(()=>{ const l=labelOf(t.id,labelMap()); return l?` · ${esc(cut(l,32))}`:""; })()}</div>${pls.length?`<div class="muted" title="${esc(pls.join("、"))}">収録 ${pls.length} PL：${esc(cut(pls.join("、"),42))}</div>`:""}${aff&&(aff.en!=null||aff.da!=null)?`<div class="muted">エネルギー${fv2(aff.en)} ダンス${fv2(aff.da)} 明るさ${fv2(aff.va)}</div>`:""}</div></div>
+  $("#deck").innerHTML=`<div class="row"><img src="${esc(t.img)}" alt=""><div><div class="t">${esc(t.name)}${t.na?` <span class="na" title="Spotifyで再生できない曲（配信停止・地域制限など）。候補には出しません">リンク切れ</span>`:""}</div><div class="a">${esc(arts(t))}${ccSpan(t.id)}</div>${(()=>{ const gl=genreList(t.id,labelMap()); return gl.length?`<div class="gps">${gl.slice(0,4).map(x=>genrePill(x,true)).join("")}</div>`:""; })()}<div class="muted">${esc(t.album)} ${t.year||""}${pcSpan(t.id)}${(()=>{ const l=labelOf(t.id,labelMap()); return l?` · ${esc(cut(l,32))}`:""; })()}</div>${pls.length?`<div class="muted" title="${esc(pls.join("、"))}">収録 ${pls.length} PL：${esc(cut(pls.join("、"),42))}</div>`:""}${aff&&(aff.en!=null||aff.da!=null)?`<div class="muted">エネルギー${fv2(aff.en)} ダンス${fv2(aff.da)} 明るさ${fv2(aff.va)}</div>`:""}</div></div>
    <div class="bk"><span class="big">${m.bpm?m.bpm.toFixed(1):"—"}</span><span class="muted">BPM</span><span class="big k">${m.key||"—"}</span><span class="muted">${m.genre?esc(m.genre):""} ${m.src?"("+(SRC_LABEL[m.src]||m.src)+(m.kSrc&&m.kSrc!==m.src?" / キー: "+(SRC_LABEL[m.kSrc]||m.kSrc):"")+(m.bSrc&&m.bSrc!==m.src?" / BPM: "+(SRC_LABEL[m.bSrc]||m.bSrc):"")+")":""}${m.src==="rekordbox"&&m.rbName&&norm(m.rbName)!==norm(t.name)?` <span class="muted" title="rekordbox のこの曲と照合しました">← rekordbox「${esc(m.rbName)}」</span>`:""}</span></div>
    <div class="bk"><input id="eBpm" placeholder="BPM" value="${m.bpm||""}"><input id="eKey" placeholder="キー 8A/Am" value="${m.key||""}"><button class="sm" id="saveMeta">保存</button><button class="sm" id="tap">TAP</button><button class="sm" data-tagbtn="${t.id}" title="この曲にタグ・評価を付ける">＃</button><button class="sm" data-p="${t.id}" title="Spotifyで再生">▶ 再生</button><button class="sm" data-c="${t.id}" title="曲名をコピー">⎘ コピー</button><button class="sm" data-lyr="${t.id}" title="曲名とアーティスト名で歌詞を検索（別のタブで開く。アプリでは歌詞を取得しない）">歌詞 ↗</button>${undo}<span class="muted" id="tapv"></span></div>
    <div class="tags" id="deckTags">${tagsOf(t.id).map(x=>`<span class="chip tag">#${esc(x)}<button data-deltag="${esc(x)}" title="外す">×</button></span>`).join("")}</div>
@@ -869,7 +871,7 @@ function renderDeck(force){
     if(taps.length>=4){ const iv=(taps[taps.length-1]-taps[0])/(taps.length-1); const b=60000/iv; $("#eBpm").value=b.toFixed(1); $("#tapv").textContent=`${taps.length}回`; } else $("#tapv").textContent=`${taps.length}回…`; };
 }
 function renderHist(){
-  $("#hist").innerHTML = S.hist.length ? S.hist.map((id,i)=>{const t=S.tracks[id]; return t?`<div><span class="n">${i+1}</span><span>${esc(t.name)} <span class="muted">— ${esc(arts(t))}</span></span></div>`:"";}).join("") : `<div class="muted">まだありません</div>`;
+  $("#hist").innerHTML = S.hist.length ? S.hist.map((id,i)=>{const t=S.tracks[id]; return t?`<div><span class="n">${i+1}</span><span>${esc(t.name)} <span class="muted">— ${esc(arts(t))}</span></span>${pcSpan(id)}</div>`:"";}).join("") : `<div class="muted">まだありません</div>`;
 }
 let sel=0;
 // 通信せずに分かる情報だけ：集めた曲情報から「アルバム→レーベル」「アーティスト→ジャンル」を作って他の曲にも流用
@@ -885,7 +887,7 @@ function labelOf(id,lm){ const e=S.ex[id], t=S.tracks[id];
   return e?.sp?.label || e?.dz?.album?.label || (t?.albumId&&lm[t.albumId]) || (t?.albumId&&S.alb[t.albumId]) || S.meta[id]?.af?.lbl || S.dg[id]?.label?.[0] || ""; }
 const cut=(x,n)=>x.length>n?x.slice(0,n-1)+"…":x;
 function subLine(id,lm,yv){ const t=S.tracks[id], a=S.meta[id]?.af; const p=[], q=[];
-  const yr=yearOf(id); if(t.dur) p.push(fmtDur(t.dur)); if(yr) p.push(yv?`<span class="yr ${yv[0]}" title="${yv[1]}（加点）">${yr}</span>`:yr); if(t.pop!=null) p.push("POP "+t.pop); const l=labelOf(id,lm); if(l) p.push(esc(cut(l,28)));
+  const yr=yearOf(id); if(t.dur) p.push(fmtDur(t.dur)); if(yr) p.push(yv?`<span class="yr ${yv[0]}" title="${yv[1]}（加点）">${yr}</span>`:yr); if(t.pop!=null) p.push("POP "+t.pop); if(S.playCnt[id]) p.push("Now×"+S.playCnt[id]); const l=labelOf(id,lm); if(l) p.push(esc(cut(l,28)));
   if(a && (a.en!=null||a.da!=null||a.va!=null)){ const f=v=>v==null?"–":Math.round(v*100);
     q.push(`<span class="af" title="エネルギー / ダンス度 / 明るさ（0〜100）">E${f(a.en)} D${f(a.da)} V${f(a.va)}</span>`); }
   return (p.length?`<div class="sub">${p.join(" · ")}</div>`:"")+(q.length?`<div class="sub">${q.join(" · ")}</div>`:""); }
@@ -946,7 +948,7 @@ const TAG_PRESET=[["時間帯",["Opener","Warm Up","Build Up","Peak Time","Closi
   ["要素",["Vocal","Instrumental","Acapella","Female Vox","Male Vox","Rap","Long Intro","Big Drop","Piano","Percussion"]],
   ["ムード",["Dark","Groovy","Euphoric","Emotional","Chill","Funky","Hard","Deep","Uplifting"]],
   ["版",["Edit","Remix","Mashup","Bootleg","Classic","New","Dub","Cover"]],
-  ["場所",["Lounge","Bar","Main Floor","Big Room","Warehouse","Festival"]],["除外",["候補にださない"]]];
+  ["場所",["Lounge","Bar","Main Floor","Big Room","Warehouse","Festival"]],["シーン",["春","桜","夏","秋","冬","クリスマス","ハロウィン","大晦日","新年"]],["除外",["候補にださない"]]];
 const PRESET_ALL=TAG_PRESET.flatMap(([,l])=>l);
 const NO_CAND_TAG="候補にださない";  // このタグが付いた曲は候補に一切出さない（参考表示にも回さない）
 const TIME_TAGS=TAG_PRESET[0][1];  // 時間帯タグは並び順がそのまま夜の進行（Opener→Warm Up→Build Up→Peak Time→Closing→After Hours）
@@ -1019,6 +1021,7 @@ function refresh(){ renderDeck(); renderHist(); renderCands(); renderInfo(); if(
 function setNow(id, push=true){
   if(!S.tracks[id]) return;
   if(push && S.now && S.now!==id){ S.hist.push(S.now); }
+  if(S.now!==id){ S.playCnt[id]=(S.playCnt[id]||0)+1; LS.set("playCnt",S.playCnt); }
   S.now=id; LS.set("now",id); LS.set("hist",S.hist); refresh();
   if(push && S.hist.length) setStatus(`Now：${S.tracks[id].name}（間違えたら ↶ 戻す／U）`);
   if(LS.get("autoRb",true) && rbTodo([id]).length) rbFill([id],true).then(g=>{ if(g){ if(S.now===id) refresh(); autoSync(); } });
@@ -1540,7 +1543,7 @@ function syncPayload(){
   const meta={}; for(const [id,m] of Object.entries(S.meta)){ if(m.bpm||m.key||m.genre||m.rbBad) meta[id]={bpm:m.bpm||0,key:m.key||"",genre:m.genre||"",src:m.src||"",...(m.rbBad?{rbBad:1}:{})}; }
   const dg={}; for(const [id,v] of Object.entries(S.dg)) if(v) dg[id]=v;
   return {v:1, at:Date.now(), meta, dg, dz:S.dz, plSel:LS.get("plSel",[]), incSaved:LS.get("incSaved",false), dj:LS.get("dj",false), copyMode:LS.get("copyMode","title"),
-    weights:Object.fromEntries(["wFlow","wCo","wBpm","wKey","wGen","wYear","wCc"].map(k=>[k,LS.get(k,null)])), hist:S.hist, now:S.now, tags:S.tags, rate:S.rate, libAt:LS.get("libSent",0), cid:LS.get("cid","")}; }
+    weights:Object.fromEntries(["wFlow","wCo","wBpm","wKey","wGen","wYear","wCc"].map(k=>[k,LS.get(k,null)])), hist:S.hist, now:S.now, playCnt:S.playCnt, tags:S.tags, rate:S.rate, libAt:LS.get("libSent",0), cid:LS.get("cid","")}; }
 const SRC_RANK={manual:4,rekordbox:3,exportify:2,reccobeats:2,deezer:1,discogs:1,"":0};
 const SRC_LABEL={deezer:"Deezer",rekordbox:"rekordbox",exportify:"Exportify",reccobeats:"ReccoBeats",manual:"手入力",discogs:"Discogs"};
 function mergeMeta(remote){
@@ -1589,7 +1592,7 @@ async function syncPull(applySettings){
     if(applySettings){ if(d.plSel&&!LS.get("plSel",[]).length) LS.set("plSel",d.plSel); if(d.incSaved!=null&&LS.get("incSaved",null)==null) LS.set("incSaved",d.incSaved);
       for(const [k,v] of Object.entries(d.weights||{})) if(v!=null && LS.get(k,null)==null) LS.set(k,v);
       if(d.copyMode && !localStorage.getItem("copyMode")) LS.set("copyMode",d.copyMode);
-      if(!S.hist.length && d.hist?.length){ S.hist=d.hist; LS.set("hist",S.hist); } if(!S.now && d.now){ S.now=d.now; LS.set("now",S.now); } }
+      if(!S.hist.length && d.hist?.length){ S.hist=d.hist; LS.set("hist",S.hist); } if(!S.now && d.now){ S.now=d.now; LS.set("now",S.now); } if(d.playCnt){ for(const [k,v] of Object.entries(d.playCnt)) if((S.playCnt[k]||0)<v) S.playCnt[k]=v; LS.set("playCnt",S.playCnt); } }
     await DB.set("meta",S.meta); await DB.set("dg",S.dg); await DB.set("dz",S.dz); LS.set("lastSync",Date.now()); LS.set("syncGotAt",Date.now());
     syncMsg(`同期：受信しました（${nl?`曲データ ${nl}曲・`:""}${n}曲のBPM等を更新）`); refresh(); renderTagFilter(); renderCcFilter(); }
   catch(e){ syncMsg("同期エラー："+e.message); }
@@ -1850,7 +1853,7 @@ $("#autoInfo").checked=LS.get("autoInfo",true); $("#autoInfo").onchange=e=>{ LS.
   S.tracks=await DB.get("tracks")||{}; S.playlists=await DB.get("playlists")||[]; S.saved=await DB.get("saved")||[];
   S.meta=await DB.get("meta")||{}; S.dz=await DB.get("dz")||{}; S.dg=await DB.get("dg")||{}; S.rb=await DB.get("rb")||{}; S.ex=await DB.get("ex")||{}; S.tags=await DB.get("tags")||{}; S.rate=await DB.get("rate")||{}; S.ag=await DB.get("ag")||{}; S.ac=await DB.get("ac")||{}; S.plIndex=await DB.get("plIndex")||[]; S.alb=await DB.get("alb")||{};
   for(const v of Object.values(S.ex)) v.running=false;
-  S.hist=LS.get("hist",[]); S.now=LS.get("now",null);
+  S.hist=LS.get("hist",[]); S.now=LS.get("now",null); S.playCnt=LS.get("playCnt",{});
   buildIndex(); renderTagFilter(); renderCcFilter();
   if(matchMedia("(max-width:760px)").matches){ $("#dWeights").open=false; $("#dHist").open=false; $("#info").open=false; }
   const authErr=new URLSearchParams(location.search).has("error");
